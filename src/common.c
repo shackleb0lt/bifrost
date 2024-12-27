@@ -24,18 +24,54 @@
 #include "common.h"
 
 /**
- * Returns a string literal corresponding to the 
+ * Returns a string literal corresponding to the
  * mode type received, returns "octet" by default
  */
-const char *get_tftp_mode_str(TFTP_MODE mode)
+size_t tftp_mode_to_str(TFTP_MODE mode, char **mode_str)
 {
-    if(mode == MODE_MAIL)
-        return "mail";
-        
-    else if(mode == MODE_NETASCII)
-        return "netascii";
+    char *str = NULL;
+    if (mode == MODE_MAIL)
+        str = "mail";
+    else if (mode == MODE_NETASCII)
+        str = "netascii";
+    else
+        str= "octet";
+    
+    *mode_str = str;
+    return strlen(str);
+}
 
-    return "octet";
+/**
+ * Parse the blocksize string and convert it to a number
+ * Check if it falls within acceptable limit of 8 to 65464 bytes
+ * Stores the parsed number in location pointed by block_size parameter
+ * @return true if valid, false otherwise
+ */
+bool is_valid_blocksize(char *size_str, size_t *block_size)
+{
+    size_t total = 0;
+    size_t index = 0;
+
+    if (size_str == NULL || *size_str == '\0')
+        return false;
+
+    for (index = 0; size_str[index] != '\0'; index++)
+    {
+        if (size_str[index] < '0' || size_str[index] > '9')
+            return false;
+
+        total *= 10;
+        total += (uint8_t)(size_str[index] - '0');
+
+        if(total > MAX_BLK_SIZE)
+            return false;
+    }
+
+    if (total < MIN_BLK_SIZE)
+        return false;
+
+    *block_size = total;
+    return true;
 }
 
 /**

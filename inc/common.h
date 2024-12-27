@@ -28,16 +28,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+
+#include <unistd.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <time.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+
 #include <stdint.h>
 #include <limits.h>
 #include <stdbool.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <time.h>
-#include <errno.h>
-#include <sys/socket.h>
-#include <netdb.h>
+#include <inttypes.h>
 
+#include <netdb.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/ip_icmp.h>
@@ -54,6 +59,10 @@ typedef struct in_addr *ipv4addr;
 
 #define PATH_LEN 500
 #define TFTP_PORT_NO 69
+
+#define TFTP_TIMEOUT_MS            150
+#define TFTP_MAXTIMEOUT_MS        2000
+#define TFTP_NUM_RETRIES            12
 
 typedef enum
 {
@@ -79,41 +88,50 @@ typedef enum
     EBADOPT = 8,
 } TFTP_ERRCODE;
 
-typedef enum 
+typedef enum
 {
     MODE_OCTET = 0,
     MODE_NETASCII = 1,
     MODE_MAIL = 2,
 } TFTP_MODE;
 
-typedef struct 
+typedef struct
 {
     char local_file_name[PATH_MAX];
     char remote_file_name[PATH_LEN];
-    uint64_t file_size;
+    struct sockaddr_in server;
+
+    int local_fd;
+
     size_t local_len;
     size_t remote_len;
-    int local_fd;
-    uint16_t blk_size;
-    TFTP_MODE mode;
+
+    char *mode_str;
+    size_t mode_len;
+
+    off_t file_size;
+
     TFTP_OPCODE action;
+    TFTP_MODE mode;
+    size_t block_size;
 } tftp_session;
 
-typedef struct 
+typedef struct
 {
     uint16_t opcode;
     union common
     {
         char args[0];
         uint16_t block;
-    } __attribute__ ((__packed__)) un;
+    } __attribute__((__packed__)) un;
     char data[0];
-} __attribute__ ((__packed__)) tftp_pkt;
+} __attribute__((__packed__)) tftp_pkt;
 
-#define	tfpt_block	un.block
-#define tftp_args	un.args
+#define tfpt_block un.block
+#define tftp_args un.args
 
 int register_sighandler(void (*handler_func)(int));
-const char *get_tftp_mode_str(TFTP_MODE mode);
+bool is_valid_blocksize(char *size, size_t *block_size);
+size_t tftp_mode_to_str(TFTP_MODE mode, char **mode_str);
 
 #endif
