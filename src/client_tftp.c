@@ -23,15 +23,15 @@
 
 #include "common.h"
 
-char * g_exe_name = NULL;
-tftp_session *g_sess_args = NULL;
+char *g_exe_name = NULL;
+tftp_session g_sess_args;
 
 /**
  * Prints the usage of the tftp client binary
  */
 void print_usage(char *err_str)
 {
-    if(err_str != NULL && *err_str != '\0')
+    if (err_str != NULL && *err_str != '\0')
         printf("Error: %s\n", err_str);
 
     printf("\nUsage:\n");
@@ -49,64 +49,37 @@ void print_usage(char *err_str)
 }
 
 /**
- * Parse the blocksize string and convert it to a number
- * Check if it falls within acceptable limit of 8 to 65464 bytes
- * Stores the parsed number in location pointed by block_size parameter 
- * @return true if valid, false otherwise
- */
-bool is_valid_blocksize(char *size, uint16_t *block_size)
-{
-    uint16_t total = 0;
-    uint32_t index = 0;
-
-    if (size == NULL || *size == '\0')
-        return false;
-
-    for (index = 0; size[index] != '\0'; index++)
-    {
-        if (size[index] < '0' || size[index] > '9')
-            return false;
-        total *= 10;
-        total += (uint8_t)(size[index] - '0');
-    }
-
-    if(total < MIN_BLK_SIZE || total > MAX_BLK_SIZE)
-        return false;
-
-    *block_size = total;
-    return true;
-}
-
-/**
  * Parses the local and file names for validity
  * Autocompletes the destination path if it's a directory
  * by using the filename of source path.
  * Also opens the local file and stores the descriptor in args
- * @return true if valid filenames, false otherwise 
+ * @return true if valid filenames, false otherwise
  */
-bool parse_filenames(tftp_session *args)
+int parse_parameters()
 {
-    char *filename = NULL;
     size_t len = 0;
+    struct stat st = {0};
+    char *filename = NULL;
 
-    args->local_fd = -1;
-    if(args->action == CODE_WRQ)
+    g_sess_args.local_fd = -1;
+
+    if (g_sess_args.action == CODE_WRQ)
     {
-        if(args->local_file_name[args->local_len-1] == '/')
+        if (g_sess_args.local_name[g_sess_args.local_len - 1] == '/')
         {
-            fprintf(stderr, "%s: local file path is directory\n", args->local_file_name);
-            return false;
+            fprintf(stderr, "%s: local file path is directory\n", g_sess_args.local_name);
+            return -1;
         }
-    
-        if(access(args->local_file_name, F_OK | R_OK) != 0)
+
+        if (access(g_sess_args.local_name, F_OK | R_OK) != 0)
         {
-            fprintf(stderr, "%s: %s\n", args->local_file_name, strerror(errno));
-            return false;
+            fprintf(stderr, "%s: %s\n", g_sess_args.local_name, strerror(errno));
+            return -1;
         }
-        
-        if(args->remote_file_name[args->remote_len-1] == '/')
+
+        if (g_sess_args.remote_name[g_sess_args.remote_len - 1] == '/')
         {
-            filename = strrchr(args->local_file_name, '/');
+            filename = strrchr(g_sess_args.local_name, '/');
             if (filename != NULL)
             {
                 filename++;
@@ -114,31 +87,38 @@ bool parse_filenames(tftp_session *args)
             }
             else
             {
-                filename = args->local_file_name;
-                len = args->local_len;
+                filename = g_sess_args.local_name;
+                len = g_sess_args.local_len;
             }
-            
-            if((args->remote_len + len) >= PATH_LEN)
+
+            if ((g_sess_args.remote_len + len) >= PATH_LEN)
             {
-                fprintf(stderr, "Destination file name %s%s is too long",args->remote_file_name, filename);
-                return false;
+                fprintf(stderr, "Destination file name %s%s is too long", g_sess_args.remote_name, filename);
+                return -1;
             }
-            strncat(args->remote_file_name, filename, len);
+            strncat(g_sess_args.remote_name, filename, len);
         }
 
-        args->local_fd = open(args->local_file_name, O_RDONLY);
-    }
-    else if(args->action == CODE_RRQ)
-    {
-        if(args->remote_file_name[args->remote_len-1] == '/')
+        if (stat(g_sess_args.local_name, &st) == -1)
         {
-            fprintf(stderr, "%s: Remote file path is directory\n", args->remote_file_name);
-            return false;
+            fprintf(stderr, "Could not stat file %s\n", g_sess_args.local_name);
+            return -1;
         }
-    
-        if(args->local_file_name[args->local_len-1] == '/')
+
+        g_sess_args.file_size = st.st_size;
+        g_sess_args.local_fd = open(g_sess_args.local_name, O_RDONLY);
+    }
+    else if (g_sess_args.action == CODE_RRQ)
+    {
+        if (g_sess_args.remote_name[g_sess_args.remote_len - 1] == '/')
         {
-            filename = strrchr(args->remote_file_name, '/');
+            fprintf(stderr, "%s: Remote file path is directory\n", g_sess_args.remote_name);
+            return -1;
+        }
+
+        if (g_sess_args.local_name[g_sess_args.local_len - 1] == '/')
+        {
+            filename = strrchr(g_sess_args.remote_name, '/');
             if (filename != NULL)
             {
                 filename++;
@@ -146,29 +126,36 @@ bool parse_filenames(tftp_session *args)
             }
             else
             {
-                filename = args->remote_file_name;
-                len = args->remote_len;
+                filename = g_sess_args.remote_name;
+                len = g_sess_args.remote_len;
             }
-            
-            if((args->remote_len + len) >= PATH_MAX)
+
+            if ((g_sess_args.local_len + len) >= PATH_MAX)
             {
-                fprintf(stderr, "Local file name %s%s will be too long\n",args->remote_file_name, filename);
-                return false;
+                fprintf(stderr, "Local file name %s%s will be too long\n", g_sess_args.local_name, filename);
+                return -1;
             }
-            strncat(args->local_file_name, filename, len);
+            strncat(g_sess_args.local_name, filename, len);
         }
-        args->local_fd = open(args->local_file_name, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+        g_sess_args.local_fd = open(g_sess_args.local_name, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     }
-    else
-        return false;
 
-    if(args->local_fd < 0)
+    if (g_sess_args.local_fd < 0)
     {
-        fprintf(stderr, "Unable to open local file %s: %s\n", args->local_file_name, strerror(errno));
-        return false;
+        fprintf(stderr, "Unable to open local file %s: %s\n", g_sess_args.local_name, strerror(errno));
+        return -1;
     }
 
-    return true;
+    g_sess_args.mode_len = tftp_mode_to_str(g_sess_args.mode, &(g_sess_args.mode_str));
+
+    if ((4 + g_sess_args.remote_len + g_sess_args.mode_len) > DEF_BLK_SIZE)
+    {
+        fprintf(stderr, "Remote file name is too long");
+        close(g_sess_args.local_fd);
+        return -1;
+    }
+
+    return 0;
 }
 
 /**
@@ -181,40 +168,36 @@ void handle_signal(int sig)
     sa.sa_handler = SIG_IGN;
     sigemptyset(&sa.sa_mask);
     sigaction(sig, &sa, NULL);
-
-    if(g_sess_args)
-    {
-        close(g_sess_args->local_fd);
-        g_sess_args = NULL;
-    }
     exit(128 + sig);
 }
 
 /**
- * Convert hostname or ipv4 address from string to 
+ * Convert hostname or ipv4 address from string to
  * network form and stores in dest_addr pointer.
  * @returns A static string which hold presentation form
  */
-char *get_dest_addr(const char *input, ipv4addr dest_addr)
+char *get_dest_addr(const char *input, struct sockaddr_in *dest_addr)
 {
     int ret = 0;
     struct addrinfo hint;
     struct addrinfo *res;
     static char ipstr[INET_ADDRSTRLEN] = {0};
 
+    dest_addr->sin_family = AF_INET;
+    dest_addr->sin_port = htons(TFTP_PORT_NO);
+
     // Check if string is of the form "X.X.X.X"
-    ret = inet_pton(AF_INET, input, dest_addr);
+    ret = inet_pton(AF_INET, input, &(dest_addr->sin_addr));
     if (ret == 1)
     {
         strncpy(ipstr, input, INET_ADDRSTRLEN - 1);
         return ipstr;
     }
 
-    // If a hostname was provided retreive it's ip address 
+    // If a hostname was provided then lookup it's ip address
     memset(&hint, 0, sizeof(struct addrinfo));
     hint.ai_family = AF_INET;
-    hint.ai_socktype = SOCK_RAW;
-    hint.ai_protocol = IPPROTO_ICMP;
+    hint.ai_socktype = SOCK_DGRAM;
     hint.ai_flags = 0;
 
     ret = getaddrinfo(input, NULL, &hint, &res);
@@ -223,18 +206,296 @@ char *get_dest_addr(const char *input, ipv4addr dest_addr)
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(ret));
         return NULL;
     }
-    dest_addr->s_addr = ((struct sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
+    dest_addr->sin_addr.s_addr = ((struct sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
     freeaddrinfo(res);
-    inet_ntop(AF_INET, dest_addr, ipstr, INET_ADDRSTRLEN);
+    inet_ntop(AF_INET, &(dest_addr->sin_addr), ipstr, INET_ADDRSTRLEN);
     return ipstr;
 }
 
-int main(int argc, char * argv[])
+size_t construct_first_packet(char *tx_buf)
+{
+    size_t tx_len = 0;
+    tftp_pkt *tx_pkt = (tftp_pkt *)tx_buf;
+    char *curr_ptr = tx_pkt->un.args;
+
+    tx_pkt->opcode = htons((uint16_t)g_sess_args.action);
+
+    strncpy(curr_ptr, g_sess_args.remote_name, g_sess_args.remote_len);
+    curr_ptr += g_sess_args.remote_len + 1;
+
+    strncpy(curr_ptr, g_sess_args.mode_str, g_sess_args.mode_len);
+    curr_ptr += g_sess_args.mode_len + 1;
+
+    tx_len = (size_t)(curr_ptr - tx_buf);
+    return tx_len;
+}
+
+size_t construct_next_packet(char *tx_buf, size_t prev_block)
+{
+    size_t tx_len = 0;
+    ssize_t bytes_read = 0;
+    tftp_pkt *tx_pkt = (tftp_pkt *) tx_buf;
+    char *curr_ptr = NULL;
+
+    tx_len = sizeof(uint16_t) << 1;
+    if(g_sess_args.action == CODE_RRQ)
+    {
+        tx_pkt->opcode = htons((uint16_t) CODE_ACK);
+        tx_pkt->un.block = htons((uint16_t) prev_block);
+        return tx_len;
+    }
+    
+    tx_pkt->opcode = htons((uint16_t) CODE_DATA);
+    tx_pkt->un.block = htons((uint16_t) prev_block + 1);
+    curr_ptr = tx_pkt->data;
+
+    bytes_read = read(g_sess_args.local_fd, curr_ptr, g_sess_args.block_size);
+    if(bytes_read <= 0)
+        return 0;
+
+    tx_len += (size_t) bytes_read;
+    return tx_len;
+}
+
+size_t construct_error_packet(char *tx_buf, TFTP_ERRCODE err_code, char *err_msg)
+{
+    int tx_len = 0;
+    tftp_pkt *tx_pkt = (tftp_pkt *) tx_buf;
+    char *curr_ptr = tx_pkt->data;
+
+    tx_pkt->opcode = htons((uint16_t) CODE_ERROR);
+    tx_pkt->un.block = htons((uint16_t) err_code);
+
+    tx_len = sizeof(uint16_t) << 1;
+
+    if(err_msg)
+    {
+        tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "%s", err_msg);
+        return (size_t) tx_len;
+    }
+
+    switch (err_code)
+    {
+        case ENOTFOUND:
+        {
+            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "File Not Found");
+            break;
+        }
+        case EACCESS:
+        {
+            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Access violation");
+            break;
+        }
+        case ENOSPACE:
+        {
+            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Disk Is Full");
+            break;
+        }
+        case EBADOP:
+        {
+            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Bad Operation");
+            break;
+        }
+        case EBADID:
+        {
+            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Unknown Transfer ID");
+            break;
+        }
+        case EEXISTS:
+        {
+            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "File Already Exists");
+            break;
+        }
+        case ENOUSER:
+        {
+            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "No Such User");
+            break;
+        }
+        case EBADOPT:
+        {
+            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Bad Option/s");
+            break;
+        }
+        default:
+        {
+            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Client Error Occured");
+            break;
+        }
+    }
+
+    return (size_t) tx_len;
+}
+
+void perform_download()
 {
     int ret = 0;
-    char * hostname = NULL;
-    tftp_session sess_args = {0};
-    struct in_addr server_ip = {0};
+    int conn_fd = -1;
+    struct pollfd pfd = {0};
+    struct in_addr recv_addr = {0};
+    struct sockaddr *addr = NULL;
+    socklen_t s_len = SOCKADDR_SIZE;
+
+    bool is_first_pkt = true;
+    bool is_finished = false;
+
+    size_t e_block_num = 1;
+    size_t r_block_num = 1;
+    ssize_t bytes_sent = 0;
+    ssize_t bytes_read = 0;
+
+    size_t tx_len = 0;
+    tftp_pkt *rx_pkt = NULL;
+
+    TFTP_OPCODE r_opcode = CODE_UNDEF;
+    TFTP_ERRCODE err_code = EUNDEF;
+
+    int retries = TFTP_NUM_RETRIES;
+    int wait_time = TFTP_TIMEOUT_MS;
+
+    const size_t BUF_SIZE = g_sess_args.block_size + 4;
+    char *tx_buf = (char *)malloc(BUF_SIZE);
+    char *rx_buf = (char *)malloc(BUF_SIZE);
+
+    if (!tx_buf || !rx_buf)
+    {
+        fprintf(stderr, "Failed to allocate memory: %s\n", strerror(errno));
+        return;
+    }
+
+    memset(tx_buf, 0, BUF_SIZE);
+    memset(rx_buf, 0, BUF_SIZE);
+
+    rx_pkt = (tftp_pkt *)rx_buf;
+    addr = (struct sockaddr *)(&g_sess_args.server);
+    recv_addr.s_addr = g_sess_args.server.sin_addr.s_addr;
+    conn_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (conn_fd < 0)
+    {
+        fprintf(stderr, "socket %s\n", strerror(errno));
+        free(tx_buf);
+        free(rx_buf);
+        return;
+    }
+
+send_packet:
+    if (is_first_pkt)
+        tx_len = construct_first_packet(tx_buf);
+    else
+        tx_len = construct_next_packet(tx_buf, r_block_num);
+    // Check tx_len for write and send error packet
+
+    retries = TFTP_NUM_RETRIES;
+    wait_time = TFTP_TIMEOUT_MS;
+
+send_again:
+    bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, addr, SOCKADDR_SIZE);
+    if (is_finished || bytes_sent <= 0)
+        goto exit_transfer;
+
+recv_again:
+    pfd.fd = conn_fd;
+    pfd.events = POLLIN;
+    ret = poll(&pfd, 1, wait_time);
+    if (ret == 0)
+    {
+        retries--;
+        if (retries == 0)
+        {
+            fprintf(stderr, "Connection Stalled\n");
+            goto exit_transfer;
+        }
+        wait_time += (wait_time >> 1);
+        if (wait_time > TFTP_MAXTIMEOUT_MS)
+            wait_time = TFTP_MAXTIMEOUT_MS;
+        goto send_again;
+    }
+    else if (ret < 0)
+    {
+        fprintf(stderr, "epoll failure: %s\n", strerror(errno));
+        // Send error packet 0 maybe?
+        goto exit_transfer;
+    }
+
+    if (is_first_pkt)
+    {
+        is_first_pkt = false;
+        bytes_read = recvfrom(conn_fd, rx_buf, BUF_SIZE, 0, addr, &s_len);
+        if (recv_addr.s_addr != g_sess_args.server.sin_addr.s_addr)
+        {
+            fprintf(stderr, "Received response from unknown IP address\n");
+            goto exit_transfer;
+        }
+
+        ret = connect(conn_fd, addr, SOCKADDR_SIZE);
+        if (ret != 0)
+        {
+            fprintf(stderr, "connect: %s\n", strerror(errno));
+            // Send error packet
+            goto exit_transfer;
+        }
+    }
+    else
+    {
+        bytes_read = recv(conn_fd, rx_buf, BUF_SIZE, 0);
+    }
+
+    if (bytes_read <= 0)
+    {
+        // Send error packet
+        goto exit_transfer;
+    }
+
+    r_opcode = ntohs(rx_pkt->opcode);
+    r_block_num = ntohs(rx_pkt->un.block);
+
+    if (r_opcode == CODE_DATA)
+    {
+        if (r_block_num == e_block_num)
+        {
+            bytes_sent = write(g_sess_args.local_fd, rx_pkt->data, (size_t)(bytes_read - 4));
+            e_block_num++;
+            if (bytes_sent != (bytes_read - 4))
+            {
+                fprintf(stderr, "write: %s\n", strerror(errno));
+                // send error packet
+                goto exit_transfer;
+            }
+
+            if ((size_t)bytes_read < g_sess_args.block_size)
+                is_finished = true;
+
+            goto send_packet;
+        }
+    }
+    else if (r_opcode == CODE_ERROR)
+    {
+        fprintf(stderr, "server error: %lu", r_block_num);
+        goto exit_transfer;
+    }
+    else
+    {
+        fprintf(stderr, "Server Error\n");
+        // send error packet
+        goto exit_transfer;
+    }
+
+    goto recv_again;
+
+send_err_packet:
+    tx_len = construct_error_packet(tx_buf, err_code, "Dummy Error");
+    is_finished = true;
+    goto send_packet;
+
+exit_transfer:
+    close(conn_fd);
+    free(tx_buf);
+    free(rx_buf);
+}
+
+int main(int argc, char *argv[])
+{
+    int ret = 0;
+    char *hostname = NULL;
 
     g_exe_name = argv[0];
 
@@ -242,9 +503,11 @@ int main(int argc, char * argv[])
     if (ret != 0)
         return EXIT_FAILURE;
 
-    memset(&sess_args, 0, sizeof(tftp_session));
-    sess_args.blk_size = DEF_BLK_SIZE;
-    sess_args.mode = MODE_OCTET;
+    memset(&g_sess_args, 0, sizeof(tftp_session));
+
+    g_sess_args.local_fd = -1;
+    g_sess_args.block_size = DEF_BLK_SIZE;
+    g_sess_args.mode = MODE_OCTET;
 
     while ((ret = getopt(argc, argv, "l:r:b:gph")) != -1)
     {
@@ -252,7 +515,7 @@ int main(int argc, char * argv[])
         {
             case 'b':
             {
-                if(!is_valid_blocksize(optarg, &(sess_args.blk_size)))
+                if(!is_valid_blocksize(optarg, &(g_sess_args.block_size)))
                 {
                     printf("Invalid Block Size %s\n", optarg);
                     print_usage("");
@@ -262,22 +525,22 @@ int main(int argc, char * argv[])
             }
             case 'g':
             {
-                if(sess_args.action != CODE_UNDEF)
+                if(g_sess_args.action != CODE_UNDEF)
                 {
                     print_usage("Either -g or -p can be passed, not both");
                     return EXIT_FAILURE;
                 }
-                sess_args.action = CODE_RRQ;
+                g_sess_args.action = CODE_RRQ;
                 break;
             }
             case 'p':
             {
-                if(sess_args.action != CODE_UNDEF)
+                if(g_sess_args.action != CODE_UNDEF)
                 {
                     print_usage("Either -g or -p can be passed, not both");
                     return EXIT_FAILURE;
                 }
-                sess_args.action = CODE_WRQ;
+                g_sess_args.action = CODE_WRQ;
                 break;
             }
             case 'l':
@@ -287,13 +550,13 @@ int main(int argc, char * argv[])
                     print_usage("Local path not provided");
                     return EXIT_FAILURE;
                 }
-                sess_args.local_len = strnlen(optarg, PATH_MAX);
-                if(sess_args.local_len >= PATH_MAX)
+                g_sess_args.local_len = strnlen(optarg, PATH_MAX);
+                if(g_sess_args.local_len >= PATH_MAX)
                 {
                     print_usage("Local path should be shorter than "TOSTRING(PATH_MAX));
                     return EXIT_FAILURE;
                 }
-                strncpy(sess_args.local_file_name, optarg, sess_args.local_len);
+                strncpy(g_sess_args.local_name, optarg, g_sess_args.local_len);
                 break;
             }
             case 'r':
@@ -303,13 +566,13 @@ int main(int argc, char * argv[])
                     print_usage("Remote path not provided");
                     return EXIT_FAILURE;
                 }
-                sess_args.remote_len = strnlen(optarg, PATH_LEN);
-                if(sess_args.remote_len >= PATH_LEN)
+                g_sess_args.remote_len = strnlen(optarg, PATH_LEN);
+                if(g_sess_args.remote_len >= PATH_LEN)
                 {
                     print_usage("Remote path is too long");
                     return EXIT_FAILURE;
                 }
-                strncpy(sess_args.remote_file_name, optarg, sess_args.remote_len);
+                strncpy(g_sess_args.remote_name, optarg, g_sess_args.remote_len);
                 break;
             }
             case 'h':
@@ -326,19 +589,19 @@ int main(int argc, char * argv[])
         }
     }
 
-    if(sess_args.action == CODE_UNDEF)
+    if (g_sess_args.action == CODE_UNDEF)
     {
         print_usage("Either -g or -p option is required");
         return EXIT_FAILURE;
     }
 
-    if(sess_args.local_len == 0)
+    if (g_sess_args.local_len == 0)
     {
         print_usage("Need to specify local path");
         return EXIT_FAILURE;
     }
 
-    if(sess_args.remote_len == 0)
+    if (g_sess_args.remote_len == 0)
     {
         print_usage("Need to specify remote path");
         return EXIT_FAILURE;
@@ -350,21 +613,20 @@ int main(int argc, char * argv[])
         return EXIT_FAILURE;
     }
 
-    hostname = get_dest_addr(argv[optind], &server_ip);
-    if(hostname == NULL)
+    hostname = get_dest_addr(argv[optind], &(g_sess_args.server));
+    if (hostname == NULL)
     {
         fprintf(stderr, "Destination IP %s could not be resolved\n", argv[optind]);
         return EXIT_FAILURE;
     }
 
-    if(!parse_filenames(&sess_args))
+    if (parse_parameters())
     {
         return EXIT_FAILURE;
     }
 
-    g_sess_args = &sess_args;
-    printf("local: %s\n", sess_args.local_file_name);
-    printf("remote: %s\n", sess_args.remote_file_name);
-    close(sess_args.local_fd);
+    perform_download();
+    close(g_sess_args.local_fd);
     return 0;
 }
+

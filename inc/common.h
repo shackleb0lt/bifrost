@@ -60,8 +60,8 @@ typedef struct in_addr *ipv4addr;
 #define PATH_LEN 500
 #define TFTP_PORT_NO 69
 
-#define TFTP_TIMEOUT_MS            150
-#define TFTP_MAXTIMEOUT_MS        2000
+#define TFTP_TIMEOUT_MS            200
+#define TFTP_MAXTIMEOUT_MS        3000
 #define TFTP_NUM_RETRIES            12
 
 typedef enum
@@ -97,11 +97,8 @@ typedef enum
 
 typedef struct
 {
-    char local_file_name[PATH_MAX];
-    char remote_file_name[PATH_LEN];
-    struct sockaddr_in server;
-
-    int local_fd;
+    char local_name[PATH_MAX];
+    char remote_name[PATH_LEN];
 
     size_t local_len;
     size_t remote_len;
@@ -109,11 +106,13 @@ typedef struct
     char *mode_str;
     size_t mode_len;
 
+    int local_fd;
     off_t file_size;
 
+    struct sockaddr_in server;
+    size_t block_size;
     TFTP_OPCODE action;
     TFTP_MODE mode;
-    size_t block_size;
 } tftp_session;
 
 typedef struct
