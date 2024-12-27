@@ -126,11 +126,10 @@ typedef struct
     char data[0];
 } __attribute__((__packed__)) tftp_pkt;
 
-#define tfpt_block un.block
-#define tftp_args un.args
 
 int register_sighandler(void (*handler_func)(int));
 bool is_valid_blocksize(char *size, size_t *block_size);
 size_t tftp_mode_to_str(TFTP_MODE mode, char **mode_str);
+const char *tftp_err_to_str(TFTP_ERRCODE err_code);
 
 #endif

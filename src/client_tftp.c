@@ -212,6 +212,17 @@ char *get_dest_addr(const char *input, struct sockaddr_in *dest_addr)
     return ipstr;
 }
 
+void display_error_packet(tftp_pkt *rx_pkt, ssize_t bytes_read)
+{
+    TFTP_ERRCODE err_code = ntohs(rx_pkt->un.block);
+    if(bytes_read == 4 || rx_pkt->data[0] == '\0')
+    {
+        fprintf(stderr, "server error: %s\n", tftp_err_to_str(err_code));
+        return;
+    }
+    fprintf(stderr, "server error: %.64s\n", rx_pkt->data);
+}
+
 size_t construct_first_packet(char *tx_buf)
 {
     size_t tx_len = 0;
@@ -274,55 +285,7 @@ size_t construct_error_packet(char *tx_buf, TFTP_ERRCODE err_code, char *err_msg
         return (size_t) tx_len;
     }
 
-    switch (err_code)
-    {
-        case ENOTFOUND:
-        {
-            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "File Not Found");
-            break;
-        }
-        case EACCESS:
-        {
-            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Access violation");
-            break;
-        }
-        case ENOSPACE:
-        {
-            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Disk Is Full");
-            break;
-        }
-        case EBADOP:
-        {
-            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Bad Operation");
-            break;
-        }
-        case EBADID:
-        {
-            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Unknown Transfer ID");
-            break;
-        }
-        case EEXISTS:
-        {
-            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "File Already Exists");
-            break;
-        }
-        case ENOUSER:
-        {
-            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "No Such User");
-            break;
-        }
-        case EBADOPT:
-        {
-            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Bad Option/s");
-            break;
-        }
-        default:
-        {
-            tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "Client Error Occured");
-            break;
-        }
-    }
-
+    tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "%s", tftp_err_to_str(err_code));
     return (size_t) tx_len;
 }
 
@@ -347,7 +310,6 @@ void perform_download()
     tftp_pkt *rx_pkt = NULL;
 
     TFTP_OPCODE r_opcode = CODE_UNDEF;
-    TFTP_ERRCODE err_code = EUNDEF;
 
     int retries = TFTP_NUM_RETRIES;
     int wait_time = TFTP_TIMEOUT_MS;
@@ -389,9 +351,15 @@ send_packet:
 
 send_again:
     bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, addr, SOCKADDR_SIZE);
-    if (is_finished || bytes_sent <= 0)
+    if(bytes_sent <= 0)
+    {
+        fprintf(stderr, "sendto: %s\n", strerror(errno));
         goto exit_transfer;
-
+    }
+    if (is_finished)
+    {
+        goto exit_transfer;
+    }
 recv_again:
     pfd.fd = conn_fd;
     pfd.events = POLLIN;
@@ -412,7 +380,6 @@ recv_again:
     else if (ret < 0)
     {
         fprintf(stderr, "epoll failure: %s\n", strerror(errno));
-        // Send error packet 0 maybe?
         goto exit_transfer;
     }
 
@@ -430,8 +397,8 @@ recv_again:
         if (ret != 0)
         {
             fprintf(stderr, "connect: %s\n", strerror(errno));
-            // Send error packet
-            goto exit_transfer;
+            tx_len = construct_error_packet(tx_buf, EUNDEF, "connect failed");
+            goto send_err_packet;
         }
     }
     else
@@ -441,8 +408,9 @@ recv_again:
 
     if (bytes_read <= 0)
     {
-        // Send error packet
-        goto exit_transfer;
+        fprintf(stderr, "recv: %s\n", strerror(errno));
+        tx_len = construct_error_packet(tx_buf, EUNDEF, strerror(errno));
+        goto send_err_packet;
     }
 
     r_opcode = ntohs(rx_pkt->opcode);
@@ -457,11 +425,11 @@ recv_again:
             if (bytes_sent != (bytes_read - 4))
             {
                 fprintf(stderr, "write: %s\n", strerror(errno));
-                // send error packet
-                goto exit_transfer;
+                tx_len = construct_error_packet(tx_buf, ENOSPACE, strerror(errno));
+                goto send_err_packet;
             }
 
-            if ((size_t)bytes_read < g_sess_args.block_size)
+            if ((size_t)(bytes_read - 4) < g_sess_args.block_size)
                 is_finished = true;
 
             goto send_packet;
@@ -469,22 +437,14 @@ recv_again:
     }
     else if (r_opcode == CODE_ERROR)
     {
-        fprintf(stderr, "server error: %lu", r_block_num);
-        goto exit_transfer;
-    }
-    else
-    {
-        fprintf(stderr, "Server Error\n");
-        // send error packet
+        display_error_packet(rx_pkt, bytes_read);
         goto exit_transfer;
     }
 
     goto recv_again;
 
 send_err_packet:
-    tx_len = construct_error_packet(tx_buf, err_code, "Dummy Error");
-    is_finished = true;
-    goto send_packet;
+    bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, addr, SOCKADDR_SIZE);
 
 exit_transfer:
     close(conn_fd);
@@ -629,4 +589,3 @@ int main(int argc, char *argv[])
     close(g_sess_args.local_fd);
     return 0;
 }
-

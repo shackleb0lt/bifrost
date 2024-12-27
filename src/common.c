@@ -23,6 +23,30 @@
 
 #include "common.h"
 
+const char * err_strs[] =
+{
+    "Unknown error",
+    "File not found",
+    "Access violation",
+    "Disk full or allocation exceeded",
+    "Illegal TFTP operation",
+    "Unknown transfer ID",
+    "File already exists",
+    "No such user",
+    "Bad option/s received"
+};
+
+/**
+ * Converts tftp error code to string
+ * Returns a pointer to string literal
+ */
+const char *tftp_err_to_str(TFTP_ERRCODE err_code)
+{
+    if(err_code > EBADOPT)
+        err_code = EUNDEF;
+    return err_strs[err_code];
+}
+
 /**
  * Returns a string literal corresponding to the
  * mode type received, returns "octet" by default
