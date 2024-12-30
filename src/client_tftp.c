@@ -462,6 +462,166 @@ exit_transfer:
         remove(g_sess_args.local_name);
 }
 
+void perform_upload()
+{
+    int ret = 0;
+    int conn_fd = -1;
+    struct pollfd pfd = {0};
+    struct in_addr saved_addr = {0};
+ 
+    bool is_first_pkt = true;
+    bool is_finished = false;
+
+    size_t e_block_num = 0;
+    size_t r_block_num = 0;
+    ssize_t bytes_sent = 0;
+    ssize_t bytes_read = 0;
+
+    size_t tx_len = 0;
+    TFTP_OPCODE r_opcode = CODE_UNDEF;
+
+    int retries = TFTP_NUM_RETRIES;
+    int wait_time = TFTP_TIMEOUT_MS;
+
+    size_t BUF_SIZE = g_sess_args.block_size + 4;
+    char *tx_buf = (char *)malloc(BUF_SIZE);
+    char *rx_buf = (char *)malloc(BUF_SIZE);
+
+    if (!tx_buf || !rx_buf)
+    {
+        fprintf(stderr, "Failed to allocate memory: %s\n", strerror(errno));
+        return;
+    }
+
+    memset(tx_buf, 0, BUF_SIZE);
+    memset(rx_buf, 0, BUF_SIZE);
+
+    saved_addr.s_addr = g_sess_args.server.sin_addr.s_addr;
+    conn_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (conn_fd < 0)
+    {
+        fprintf(stderr, "socket %s\n", strerror(errno));
+        free(tx_buf);
+        free(rx_buf);
+        return;
+    }
+
+send_packet:
+    if (is_first_pkt)
+        tx_len = construct_first_packet(tx_buf);
+    else
+        tx_len = construct_next_packet(tx_buf, r_block_num);
+    
+    if (tx_len == (size_t) -1)
+    {
+        tx_len = construct_error_packet(tx_buf, EUNDEF, "read");
+        goto send_err_packet;
+    }
+    else if (!is_first_pkt && tx_len < BUF_SIZE)
+    {
+        is_finished = true;
+    }
+
+    retries = TFTP_NUM_RETRIES;
+    wait_time = TFTP_TIMEOUT_MS;
+
+send_again:
+    bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, g_sess_args.addr, SOCKADDR_SIZE);
+    if (bytes_sent != (ssize_t) tx_len)
+    {
+        fprintf(stderr, "sendto: %s\n", strerror(errno));
+        goto exit_transfer;
+    }
+
+recv_again:
+    pfd.fd = conn_fd;
+    pfd.events = POLLIN;
+    ret = poll(&pfd, 1, wait_time);
+    if (ret == 0)
+    {
+        retries--;
+        if (retries == 0)
+        {
+            fprintf(stderr, "TFTP timeout\n");
+            goto exit_transfer;
+        }
+        wait_time += (wait_time >> 1);
+        if (wait_time > TFTP_MAXTIMEOUT_MS)
+            wait_time = TFTP_MAXTIMEOUT_MS;
+        goto send_again;
+    }
+    else if (ret < 0)
+    {
+        tx_len = construct_error_packet(tx_buf, EUNDEF, "epoll");
+        goto send_err_packet;
+    }
+
+    if (is_first_pkt)
+    {
+        socklen_t s_len = SOCKADDR_SIZE;
+
+        is_first_pkt = false;
+        bytes_read = recvfrom(conn_fd, rx_buf, BUF_SIZE, 0, g_sess_args.addr, &s_len);
+        if (saved_addr.s_addr != g_sess_args.server.sin_addr.s_addr)
+        {
+            fprintf(stderr, "Received response from unknown IP address\n");
+            goto exit_transfer;
+        }
+
+        ret = connect(conn_fd, g_sess_args.addr, SOCKADDR_SIZE);
+        if (ret != 0)
+        {
+            tx_len = construct_error_packet(tx_buf, EUNDEF, "connect");
+            goto send_err_packet;
+        }
+    }
+    else
+    {
+        bytes_read = recv(conn_fd, rx_buf, BUF_SIZE, 0);
+    }
+
+    if (bytes_read <= 0)
+    {
+        tx_len = construct_error_packet(tx_buf, EUNDEF, "recv");
+        goto send_err_packet;
+    }
+
+    r_opcode = get_opcode(rx_buf);
+    r_block_num = get_blocknum(rx_buf);
+
+    if (r_opcode == CODE_ACK)
+    {
+        if(r_block_num == e_block_num)
+        {
+            e_block_num++;
+            g_sess_args.curr_size += bytes_sent;
+            if (is_finished)
+            {
+                goto exit_transfer;
+            }
+            goto send_packet;
+        }
+    }
+    else if (r_opcode == CODE_ERROR)
+    {
+        display_error_packet(rx_buf);
+        goto exit_transfer;
+    }
+
+    goto recv_again;
+
+send_err_packet:
+    bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, g_sess_args.addr, SOCKADDR_SIZE);
+
+exit_transfer:
+    fflush(stderr);
+    fflush(stdout);
+    close(conn_fd);
+    close(g_sess_args.local_fd);
+    free(tx_buf);
+    free(rx_buf);
+}
+
 int main(int argc, char *argv[])
 {
     int ret = 0;
@@ -596,7 +756,10 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    perform_download();
+    if(g_sess_args.action == CODE_RRQ)
+        perform_download();
+    else if(g_sess_args.action == CODE_WRQ)
+        perform_upload();
 
     return 0;
 }
