@@ -50,6 +50,12 @@
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 
+#define get_opcode(buf)     ntohs(((uint16_t *)buf)[0])
+#define get_blocknum(buf)   ntohs(((uint16_t *)buf)[1])
+
+#define set_opcode(buf, x)   ((uint16_t *)buf)[0] = htons((uint16_t)(x))
+#define set_blocknum(buf, x) ((uint16_t *)buf)[1] = htons((uint16_t)(x))
+
 #define SOCKADDR_SIZE sizeof(struct sockaddr_in)
 typedef struct in_addr *ipv4addr;
 
@@ -57,8 +63,10 @@ typedef struct in_addr *ipv4addr;
 #define DEF_BLK_SIZE 512
 #define MAX_BLK_SIZE 65464
 
-#define PATH_LEN 500
-#define TFTP_PORT_NO 69
+#define PATH_LEN        500
+#define TFTP_PORT_NO    69
+#define TFTP_DATA_OFF   4
+#define TFTP_ARGS_OFF   2
 
 #define TFTP_TIMEOUT_MS            200
 #define TFTP_MAXTIMEOUT_MS        3000
@@ -95,6 +103,14 @@ typedef enum
     MODE_MAIL = 2,
 } TFTP_MODE;
 
+typedef enum 
+{
+    PROG_START = 0,
+    PROG_UPDATE = 1,
+    PROG_FINISH = 2,
+    PROG_ERROR = 3,
+} TFTP_PROGRESS;
+
 typedef struct
 {
     char local_name[PATH_MAX];
@@ -108,23 +124,15 @@ typedef struct
 
     int local_fd;
     off_t file_size;
+    off_t curr_size;
 
     struct sockaddr_in server;
+    struct sockaddr *addr;
+
     size_t block_size;
     TFTP_OPCODE action;
     TFTP_MODE mode;
 } tftp_session;
-
-typedef struct
-{
-    uint16_t opcode;
-    union common
-    {
-        char args[0];
-        uint16_t block;
-    } __attribute__((__packed__)) un;
-    char data[0];
-} __attribute__((__packed__)) tftp_pkt;
 
 
 int register_sighandler(void (*handler_func)(int));

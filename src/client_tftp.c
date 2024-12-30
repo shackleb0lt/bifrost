@@ -23,6 +23,7 @@
 
 #include "common.h"
 
+bool is_prog_bar = false;
 char *g_exe_name = NULL;
 tftp_session g_sess_args;
 
@@ -212,24 +213,32 @@ char *get_dest_addr(const char *input, struct sockaddr_in *dest_addr)
     return ipstr;
 }
 
-void display_error_packet(tftp_pkt *rx_pkt, ssize_t bytes_read)
+void display_error_packet(char *rx_buf)
 {
-    TFTP_ERRCODE err_code = ntohs(rx_pkt->un.block);
-    if(bytes_read == 4 || rx_pkt->data[0] == '\0')
-    {
+    char *err_msg = rx_buf + TFTP_DATA_OFF;
+    TFTP_ERRCODE err_code = get_blocknum(rx_buf);
+    size_t len = strnlen(err_msg, g_sess_args.block_size - 1);
+
+    err_msg[len] = '\0';
+
+    if(len == 0)
         fprintf(stderr, "server error: %s\n", tftp_err_to_str(err_code));
-        return;
-    }
-    fprintf(stderr, "server error: %.64s\n", rx_pkt->data);
+    else
+        fprintf(stderr, "server error: %s\n", err_msg);
 }
 
+/**
+ * Fill the buffer with TFTP request data to server
+ * following the  RFC 1350 specifications 
+ * Returns the packet length which can be supplied
+ * to sendto function along with the buffer 
+ */
 size_t construct_first_packet(char *tx_buf)
 {
     size_t tx_len = 0;
-    tftp_pkt *tx_pkt = (tftp_pkt *)tx_buf;
-    char *curr_ptr = tx_pkt->un.args;
+    char *curr_ptr = tx_buf + TFTP_ARGS_OFF;
 
-    tx_pkt->opcode = htons((uint16_t)g_sess_args.action);
+    set_opcode(tx_buf, g_sess_args.action);
 
     strncpy(curr_ptr, g_sess_args.remote_name, g_sess_args.remote_len);
     curr_ptr += g_sess_args.remote_len + 1;
@@ -241,28 +250,34 @@ size_t construct_first_packet(char *tx_buf)
     return tx_len;
 }
 
+/**
+ * Construct the next block for TFTP transfer
+ * Can be an ACK  packet in case of download
+ * Can be a DATA packet in case of upload
+ * 
+ * Returns the packet length which can be supplied
+ * to sendto function along with the buffer 
+ */
 size_t construct_next_packet(char *tx_buf, size_t prev_block)
 {
     size_t tx_len = 0;
     ssize_t bytes_read = 0;
-    tftp_pkt *tx_pkt = (tftp_pkt *) tx_buf;
-    char *curr_ptr = NULL;
+    char *curr_ptr = tx_buf + TFTP_DATA_OFF;
 
-    tx_len = sizeof(uint16_t) << 1;
+    tx_len = TFTP_DATA_OFF;
     if(g_sess_args.action == CODE_RRQ)
     {
-        tx_pkt->opcode = htons((uint16_t) CODE_ACK);
-        tx_pkt->un.block = htons((uint16_t) prev_block);
+        set_opcode(tx_buf, CODE_ACK);
+        set_blocknum(tx_buf, prev_block);
         return tx_len;
     }
-    
-    tx_pkt->opcode = htons((uint16_t) CODE_DATA);
-    tx_pkt->un.block = htons((uint16_t) prev_block + 1);
-    curr_ptr = tx_pkt->data;
+
+    set_opcode(tx_buf, CODE_DATA);
+    set_blocknum(tx_buf, prev_block + 1);
 
     bytes_read = read(g_sess_args.local_fd, curr_ptr, g_sess_args.block_size);
-    if(bytes_read <= 0)
-        return 0;
+    if (bytes_read < 0)
+        return (size_t) -1;
 
     tx_len += (size_t) bytes_read;
     return tx_len;
@@ -270,22 +285,17 @@ size_t construct_next_packet(char *tx_buf, size_t prev_block)
 
 size_t construct_error_packet(char *tx_buf, TFTP_ERRCODE err_code, char *err_msg)
 {
-    int tx_len = 0;
-    tftp_pkt *tx_pkt = (tftp_pkt *) tx_buf;
-    char *curr_ptr = tx_pkt->data;
-
-    tx_pkt->opcode = htons((uint16_t) CODE_ERROR);
-    tx_pkt->un.block = htons((uint16_t) err_code);
-
-    tx_len = sizeof(uint16_t) << 1;
+    int tx_len = TFTP_DATA_OFF;
+    char *curr_ptr = tx_buf + TFTP_DATA_OFF;
+    set_opcode(tx_buf, CODE_ERROR);
+    set_blocknum(tx_buf, err_code);
 
     if(err_msg)
-    {
-        tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "%s", err_msg);
-        return (size_t) tx_len;
-    }
+        tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "%s: %s", strerror(errno), err_msg);
+    else
+        tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "%s", tftp_err_to_str(err_code));
 
-    tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "%s", tftp_err_to_str(err_code));
+    fprintf(stderr, "%s\n", curr_ptr);   
     return (size_t) tx_len;
 }
 
@@ -294,10 +304,8 @@ void perform_download()
     int ret = 0;
     int conn_fd = -1;
     struct pollfd pfd = {0};
-    struct in_addr recv_addr = {0};
-    struct sockaddr *addr = NULL;
-    socklen_t s_len = SOCKADDR_SIZE;
-
+    struct in_addr saved_addr = {0};
+ 
     bool is_first_pkt = true;
     bool is_finished = false;
 
@@ -307,14 +315,12 @@ void perform_download()
     ssize_t bytes_read = 0;
 
     size_t tx_len = 0;
-    tftp_pkt *rx_pkt = NULL;
-
     TFTP_OPCODE r_opcode = CODE_UNDEF;
 
     int retries = TFTP_NUM_RETRIES;
     int wait_time = TFTP_TIMEOUT_MS;
 
-    const size_t BUF_SIZE = g_sess_args.block_size + 4;
+    size_t BUF_SIZE = g_sess_args.block_size + 4;
     char *tx_buf = (char *)malloc(BUF_SIZE);
     char *rx_buf = (char *)malloc(BUF_SIZE);
 
@@ -327,9 +333,7 @@ void perform_download()
     memset(tx_buf, 0, BUF_SIZE);
     memset(rx_buf, 0, BUF_SIZE);
 
-    rx_pkt = (tftp_pkt *)rx_buf;
-    addr = (struct sockaddr *)(&g_sess_args.server);
-    recv_addr.s_addr = g_sess_args.server.sin_addr.s_addr;
+    saved_addr.s_addr = g_sess_args.server.sin_addr.s_addr;
     conn_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (conn_fd < 0)
     {
@@ -344,22 +348,23 @@ send_packet:
         tx_len = construct_first_packet(tx_buf);
     else
         tx_len = construct_next_packet(tx_buf, r_block_num);
-    // Check tx_len for write and send error packet
 
     retries = TFTP_NUM_RETRIES;
     wait_time = TFTP_TIMEOUT_MS;
 
 send_again:
-    bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, addr, SOCKADDR_SIZE);
-    if(bytes_sent <= 0)
+    bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, g_sess_args.addr, SOCKADDR_SIZE);
+    if (bytes_sent != (ssize_t) tx_len)
     {
         fprintf(stderr, "sendto: %s\n", strerror(errno));
         goto exit_transfer;
     }
+
     if (is_finished)
     {
         goto exit_transfer;
     }
+
 recv_again:
     pfd.fd = conn_fd;
     pfd.events = POLLIN;
@@ -369,7 +374,7 @@ recv_again:
         retries--;
         if (retries == 0)
         {
-            fprintf(stderr, "Connection Stalled\n");
+            fprintf(stderr, "TFTP timeout\n");
             goto exit_transfer;
         }
         wait_time += (wait_time >> 1);
@@ -379,25 +384,26 @@ recv_again:
     }
     else if (ret < 0)
     {
-        fprintf(stderr, "epoll failure: %s\n", strerror(errno));
-        goto exit_transfer;
+        tx_len = construct_error_packet(tx_buf, EUNDEF, "epoll");
+        goto send_err_packet;
     }
 
     if (is_first_pkt)
     {
+        socklen_t s_len = SOCKADDR_SIZE;
+
         is_first_pkt = false;
-        bytes_read = recvfrom(conn_fd, rx_buf, BUF_SIZE, 0, addr, &s_len);
-        if (recv_addr.s_addr != g_sess_args.server.sin_addr.s_addr)
+        bytes_read = recvfrom(conn_fd, rx_buf, BUF_SIZE, 0, g_sess_args.addr, &s_len);
+        if (saved_addr.s_addr != g_sess_args.server.sin_addr.s_addr)
         {
             fprintf(stderr, "Received response from unknown IP address\n");
             goto exit_transfer;
         }
 
-        ret = connect(conn_fd, addr, SOCKADDR_SIZE);
+        ret = connect(conn_fd, g_sess_args.addr, SOCKADDR_SIZE);
         if (ret != 0)
         {
-            fprintf(stderr, "connect: %s\n", strerror(errno));
-            tx_len = construct_error_packet(tx_buf, EUNDEF, "connect failed");
+            tx_len = construct_error_packet(tx_buf, EUNDEF, "connect");
             goto send_err_packet;
         }
     }
@@ -408,48 +414,52 @@ recv_again:
 
     if (bytes_read <= 0)
     {
-        fprintf(stderr, "recv: %s\n", strerror(errno));
-        tx_len = construct_error_packet(tx_buf, EUNDEF, strerror(errno));
+        tx_len = construct_error_packet(tx_buf, EUNDEF, "recv");
         goto send_err_packet;
     }
 
-    r_opcode = ntohs(rx_pkt->opcode);
-    r_block_num = ntohs(rx_pkt->un.block);
+    r_opcode = get_opcode(rx_buf);
+    r_block_num = get_blocknum(rx_buf);
 
     if (r_opcode == CODE_DATA)
     {
         if (r_block_num == e_block_num)
         {
-            bytes_sent = write(g_sess_args.local_fd, rx_pkt->data, (size_t)(bytes_read - 4));
+            char *data = rx_buf + TFTP_DATA_OFF;
+            bytes_sent = write(g_sess_args.local_fd, data, (size_t)(bytes_read - 4));
             e_block_num++;
             if (bytes_sent != (bytes_read - 4))
             {
-                fprintf(stderr, "write: %s\n", strerror(errno));
-                tx_len = construct_error_packet(tx_buf, ENOSPACE, strerror(errno));
+                tx_len = construct_error_packet(tx_buf, ENOSPACE, "write");
                 goto send_err_packet;
             }
 
+            g_sess_args.curr_size += bytes_sent;
+
             if ((size_t)(bytes_read - 4) < g_sess_args.block_size)
                 is_finished = true;
-
             goto send_packet;
         }
     }
     else if (r_opcode == CODE_ERROR)
     {
-        display_error_packet(rx_pkt, bytes_read);
+        display_error_packet(rx_buf);
         goto exit_transfer;
     }
 
     goto recv_again;
 
 send_err_packet:
-    bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, addr, SOCKADDR_SIZE);
+    bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, g_sess_args.addr, SOCKADDR_SIZE);
 
 exit_transfer:
     close(conn_fd);
+    close(g_sess_args.local_fd);
     free(tx_buf);
     free(rx_buf);
+
+    if(!is_finished)
+        remove(g_sess_args.local_name);
 }
 
 int main(int argc, char *argv[])
@@ -466,6 +476,7 @@ int main(int argc, char *argv[])
     memset(&g_sess_args, 0, sizeof(tftp_session));
 
     g_sess_args.local_fd = -1;
+    g_sess_args.addr = (struct sockaddr *)&g_sess_args.server;
     g_sess_args.block_size = DEF_BLK_SIZE;
     g_sess_args.mode = MODE_OCTET;
 
@@ -586,6 +597,6 @@ int main(int argc, char *argv[])
     }
 
     perform_download();
-    close(g_sess_args.local_fd);
+
     return 0;
 }
