@@ -303,7 +303,10 @@ int recieve_oack_packet(char *args, ssize_t len)
     }
 
     if(!is_valid_blocksize(val, &(g_sess_args.block_size)))
+    {
+        fprintf(stderr, "Illegal blocksize %s\n", val);
         return -1;
+    }
 
     return 0;
 }
@@ -350,7 +353,9 @@ ssize_t receive_first_packet(int conn_fd, char *rx_buf, size_t BUF_SIZE)
  */
 size_t construct_first_packet(char *tx_buf)
 {
+    int op_len = 0;
     size_t tx_len = 0;
+    char op_buf[16] = {0};
     char *curr_ptr = tx_buf + TFTP_ARGS_OFF;
 
     set_opcode(tx_buf, g_sess_args.action);
@@ -360,6 +365,41 @@ size_t construct_first_packet(char *tx_buf)
 
     strncpy(curr_ptr, g_sess_args.mode_str, g_sess_args.mode_len);
     curr_ptr += g_sess_args.mode_len + 1;
+
+    tx_len = (size_t)(curr_ptr - tx_buf);
+
+    if (g_sess_args.block_size != DEF_BLK_SIZE)
+    {
+        op_len = snprintf(op_buf, 16, "%lu", g_sess_args.block_size);
+        tx_len += (size_t)op_len + BLKSIZE_OPLEN + 2;
+
+        if (tx_len > DEF_BLK_SIZE)
+        {
+            fprintf(stderr, "Remote path too long\n");
+            return (size_t)-1;
+        }
+
+        strncpy(curr_ptr, BLKSIZE_OP, BLKSIZE_OPLEN + 1);
+        curr_ptr += BLKSIZE_OPLEN + 1;
+
+        strncpy(curr_ptr, op_buf, (size_t) op_len);
+        curr_ptr += op_len + 1;
+    }
+
+    op_len = snprintf(op_buf, 16, "%lu", g_sess_args.file_size);
+    tx_len += (size_t)op_len + TSIZE_OPLEN + 2;
+
+    if (tx_len > DEF_BLK_SIZE)
+    {
+        fprintf(stderr, "Remote path too long\n");
+        return (size_t)-1;
+    }
+
+    strncpy(curr_ptr, TSIZE_OP, TSIZE_OPLEN + 1);
+    curr_ptr += TSIZE_OPLEN + 1;
+
+    strncpy(curr_ptr, op_buf, (size_t) op_len);
+    curr_ptr += op_len + 1;
 
     tx_len = (size_t)(curr_ptr - tx_buf);
     return tx_len;
@@ -412,7 +452,7 @@ size_t construct_error_packet(char *tx_buf, TFTP_ERRCODE err_code, char *err_msg
     set_blocknum(tx_buf, err_code);
 
     if (err_msg)
-        tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "%s: %s", strerror(errno), err_msg);
+        tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "%s: %s", err_msg, strerror(errno));
     else
         tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "%s", tftp_err_to_str(err_code));
 
@@ -524,10 +564,40 @@ recv_again:
     }
 
     r_opcode = get_opcode(rx_buf);
-    r_block_num = get_blocknum(rx_buf);
 
+    if (is_oack_exp)
+    {
+        is_oack_exp = false;
+        if (r_opcode == CODE_OACK)
+        {
+            ret = recieve_oack_packet(rx_buf + TFTP_ARGS_OFF, bytes_read - TFTP_ARGS_OFF);
+            if (ret == -1)
+            {
+                tx_len = construct_error_packet(tx_buf, EBADOPT, NULL, false);
+                goto send_err_packet;
+            }
+        }
+        else 
+            g_sess_args.block_size = DEF_BLK_SIZE;
+
+        if (g_sess_args.block_size != (BUF_SIZE - TFTP_DATA_OFF))
+        {
+            BUF_SIZE = allocate_packet_buf(&tx_buf, &rx_buf);
+            if(!BUF_SIZE)
+                goto exit_transfer;
+        }
+
+        if (r_opcode == CODE_OACK)
+        {
+            // To send ACK 0 for the OACK
+            r_block_num = 0;
+            goto send_packet;
+        }
+    }
+    
     if (r_opcode == CODE_DATA)
     {
+        r_block_num = get_blocknum(rx_buf);
         if (r_block_num == e_block_num)
         {
             char *data = rx_buf + TFTP_DATA_OFF;
@@ -576,6 +646,7 @@ void perform_upload()
 
     bool is_first_pkt = true;
     bool is_finished = false;
+    bool is_oack_exp = true;
 
     size_t e_block_num = 0;
     size_t r_block_num = 0;
@@ -674,18 +745,51 @@ recv_again:
     }
 
     r_opcode = get_opcode(rx_buf);
-    r_block_num = get_blocknum(rx_buf);
 
+    if (is_oack_exp)
+    {
+        is_oack_exp = false;
+        if (r_opcode == CODE_OACK)
+        {
+            ret = recieve_oack_packet(rx_buf + TFTP_ARGS_OFF, bytes_read - TFTP_ARGS_OFF);
+            if (ret == -1)
+            {
+                tx_len = construct_error_packet(tx_buf, EBADOPT, NULL, false);
+                goto send_err_packet;
+            }
+        }
+        else
+            g_sess_args.block_size = DEF_BLK_SIZE;
+
+        if (g_sess_args.block_size != (BUF_SIZE - TFTP_DATA_OFF))
+        {
+            BUF_SIZE = allocate_packet_buf(&tx_buf, &rx_buf);
+            if(!BUF_SIZE)
+                goto exit_transfer;
+        }
+
+        if (r_opcode == CODE_OACK)
+        {
+            // Expect ACK 1 instead of ACK 0
+            // After Option negotiation
+            e_block_num = 1;
+            goto send_packet;
+        }
+
+    }
+    
     if (r_opcode == CODE_ACK)
     {
+        r_block_num = get_blocknum(rx_buf);
         if (r_block_num == e_block_num)
         {
-            e_block_num++;
             g_sess_args.curr_size += bytes_sent;
             if (is_finished)
             {
                 goto exit_transfer;
             }
+
+            e_block_num++;
             goto send_packet;
         }
     }
