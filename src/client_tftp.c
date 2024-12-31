@@ -232,6 +232,33 @@ void display_error_packet(char *rx_buf)
         fprintf(stderr, "server error: %s\n", err_msg);
 }
 
+ssize_t receive_first_packet(int conn_fd, char *rx_buf, size_t BUF_SIZE)
+{
+    int ret = 0;
+    ssize_t bytes_read = 0;
+    socklen_t s_len = SOCKADDR_SIZE;
+    struct in_addr saved_addr = {0};
+
+    saved_addr.s_addr = g_sess_args.server.sin_addr.s_addr;
+    bytes_read = recvfrom(conn_fd, rx_buf, BUF_SIZE, 0, g_sess_args.addr, &s_len);
+    if (bytes_read > 0)
+    {
+        if (saved_addr.s_addr != g_sess_args.server.sin_addr.s_addr)
+        {
+            fprintf(stderr, "Received response from unknown IP address\n");
+            return -1;
+        }
+
+        ret = connect(conn_fd, g_sess_args.addr, SOCKADDR_SIZE);
+        if (ret != 0)
+        {
+            fprintf(stderr, "connect: %s\n", strerror(errno));
+            return -1;
+        }
+    }
+    return bytes_read;
+}
+
 /**
  * Fill the buffer with TFTP request data to server
  * following the  RFC 1350 specifications 
@@ -331,7 +358,7 @@ void perform_download()
     int retries = TFTP_NUM_RETRIES;
     int wait_time = TFTP_TIMEOUT_MS;
 
-    size_t BUF_SIZE = g_sess_args.block_size + 4;
+    size_t BUF_SIZE = g_sess_args.block_size + TFTP_DATA_OFF;
     char *tx_buf = (char *)malloc(BUF_SIZE);
     char *rx_buf = (char *)malloc(BUF_SIZE);
 
@@ -353,21 +380,21 @@ void perform_download()
         return;
     }
 
-send_packet:
-    if (is_first_pkt)
         tx_len = construct_first_packet(tx_buf);
-    else
-        tx_len = construct_next_packet(tx_buf, r_block_num);
-
     if (tx_len == (size_t)-1)
         goto exit_transfer;
+
+    goto send_again;
+
+send_packet:
+    tx_len = construct_next_packet(tx_buf, r_block_num);
 
     retries = TFTP_NUM_RETRIES;
     wait_time = TFTP_TIMEOUT_MS;
 
 send_again:
     bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, g_sess_args.addr, SOCKADDR_SIZE);
-    if (bytes_sent != (ssize_t) tx_len)
+    if (bytes_sent != (ssize_t)tx_len)
     {
         fprintf(stderr, "sendto: %s\n", strerror(errno));
         goto exit_transfer;
@@ -403,34 +430,19 @@ recv_again:
 
     if (is_first_pkt)
     {
-        socklen_t s_len = SOCKADDR_SIZE;
-        struct in_addr saved_addr = {0};
-
         is_first_pkt = false;
-        saved_addr.s_addr = g_sess_args.server.sin_addr.s_addr;
-        bytes_read = recvfrom(conn_fd, rx_buf, BUF_SIZE, 0, g_sess_args.addr, &s_len);
-        if (saved_addr.s_addr != g_sess_args.server.sin_addr.s_addr)
-        {
-            fprintf(stderr, "Received response from unknown IP address\n");
+        bytes_read = receive_first_packet(conn_fd, rx_buf, BUF_SIZE);
+        if (bytes_read <= 0)
             goto exit_transfer;
-        }
-
-        ret = connect(conn_fd, g_sess_args.addr, SOCKADDR_SIZE);
-        if (ret != 0)
-        {
-            tx_len = construct_error_packet(tx_buf, EUNDEF, "connect");
-            goto send_err_packet;
-        }
     }
     else
     {
         bytes_read = recv(conn_fd, rx_buf, BUF_SIZE, 0);
-    }
-
     if (bytes_read <= 0)
     {
         tx_len = construct_error_packet(tx_buf, EUNDEF, "recv");
         goto send_err_packet;
+        }
     }
 
     r_opcode = get_opcode(rx_buf);
@@ -473,7 +485,7 @@ exit_transfer:
     free(tx_buf);
     free(rx_buf);
 
-    if(!is_finished)
+    if (!is_finished)
         remove(g_sess_args.local_name);
 }
 
@@ -497,7 +509,7 @@ void perform_upload()
     int retries = TFTP_NUM_RETRIES;
     int wait_time = TFTP_TIMEOUT_MS;
 
-    size_t BUF_SIZE = g_sess_args.block_size + 4;
+    size_t BUF_SIZE = g_sess_args.block_size + TFTP_DATA_OFF;
     char *tx_buf = (char *)malloc(BUF_SIZE);
     char *rx_buf = (char *)malloc(BUF_SIZE);
 
@@ -519,20 +531,18 @@ void perform_upload()
         return;
     }
 
+    tx_len = construct_first_packet(tx_buf);
+    if (tx_len == (size_t)-1)
+        goto exit_transfer;
+
+    goto send_again;
+
 send_packet:
-    if (is_first_pkt)
-        tx_len = construct_first_packet(tx_buf);
-    else
         tx_len = construct_next_packet(tx_buf, r_block_num);
-    
-    if (tx_len == (size_t) -1)
-    {
-        if(!is_first_pkt)
+    if (tx_len == (size_t)-1)
     {
         tx_len = construct_error_packet(tx_buf, EUNDEF, "read");
         goto send_err_packet;
-        }
-        goto exit_transfer;
     }
     else if (!is_first_pkt && tx_len < BUF_SIZE)
     {
@@ -544,7 +554,7 @@ send_packet:
 
 send_again:
     bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, g_sess_args.addr, SOCKADDR_SIZE);
-    if (bytes_sent != (ssize_t) tx_len)
+    if (bytes_sent != (ssize_t)tx_len)
     {
         fprintf(stderr, "sendto: %s\n", strerror(errno));
         goto exit_transfer;
@@ -575,34 +585,19 @@ recv_again:
 
     if (is_first_pkt)
     {
-        socklen_t s_len = SOCKADDR_SIZE;
-        struct in_addr saved_addr = {0};
-
         is_first_pkt = false;
-        saved_addr.s_addr = g_sess_args.server.sin_addr.s_addr;
-        bytes_read = recvfrom(conn_fd, rx_buf, BUF_SIZE, 0, g_sess_args.addr, &s_len);
-        if (saved_addr.s_addr != g_sess_args.server.sin_addr.s_addr)
-        {
-            fprintf(stderr, "Received response from unknown IP address\n");
+        bytes_read = receive_first_packet(conn_fd, rx_buf, BUF_SIZE);
+        if (bytes_read <= 0)
             goto exit_transfer;
-        }
-
-        ret = connect(conn_fd, g_sess_args.addr, SOCKADDR_SIZE);
-        if (ret != 0)
-        {
-            tx_len = construct_error_packet(tx_buf, EUNDEF, "connect");
-            goto send_err_packet;
-        }
     }
     else
     {
         bytes_read = recv(conn_fd, rx_buf, BUF_SIZE, 0);
-    }
-
     if (bytes_read <= 0)
     {
         tx_len = construct_error_packet(tx_buf, EUNDEF, "recv");
         goto send_err_packet;
+        }
     }
 
     r_opcode = get_opcode(rx_buf);
@@ -610,7 +605,7 @@ recv_again:
 
     if (r_opcode == CODE_ACK)
     {
-        if(r_block_num == e_block_num)
+        if (r_block_num == e_block_num)
         {
             e_block_num++;
             g_sess_args.curr_size += bytes_sent;
