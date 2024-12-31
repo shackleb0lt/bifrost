@@ -342,7 +342,7 @@ void perform_download()
     int ret = 0;
     int conn_fd = -1;
     struct pollfd pfd = {0};
- 
+
     bool is_first_pkt = true;
     bool is_finished = false;
     bool is_oack_exp = true;
@@ -380,7 +380,7 @@ void perform_download()
         return;
     }
 
-        tx_len = construct_first_packet(tx_buf);
+    tx_len = construct_first_packet(tx_buf);
     if (tx_len == (size_t)-1)
         goto exit_transfer;
 
@@ -438,10 +438,10 @@ recv_again:
     else
     {
         bytes_read = recv(conn_fd, rx_buf, BUF_SIZE, 0);
-    if (bytes_read <= 0)
-    {
-        tx_len = construct_error_packet(tx_buf, EUNDEF, "recv");
-        goto send_err_packet;
+        if (bytes_read <= 0)
+        {
+            tx_len = construct_error_packet(tx_buf, EUNDEF, "recv");
+            goto send_err_packet;
         }
     }
 
@@ -494,7 +494,7 @@ void perform_upload()
     int ret = 0;
     int conn_fd = -1;
     struct pollfd pfd = {0};
- 
+
     bool is_first_pkt = true;
     bool is_finished = false;
 
@@ -538,7 +538,7 @@ void perform_upload()
     goto send_again;
 
 send_packet:
-        tx_len = construct_next_packet(tx_buf, r_block_num);
+    tx_len = construct_next_packet(tx_buf, r_block_num);
     if (tx_len == (size_t)-1)
     {
         tx_len = construct_error_packet(tx_buf, EUNDEF, "read");
@@ -593,10 +593,10 @@ recv_again:
     else
     {
         bytes_read = recv(conn_fd, rx_buf, BUF_SIZE, 0);
-    if (bytes_read <= 0)
-    {
-        tx_len = construct_error_packet(tx_buf, EUNDEF, "recv");
-        goto send_err_packet;
+        if (bytes_read <= 0)
+        {
+            tx_len = construct_error_packet(tx_buf, EUNDEF, "recv");
+            goto send_err_packet;
         }
     }
 
