@@ -213,6 +213,11 @@ char *get_dest_addr(const char *input, struct sockaddr_in *dest_addr)
     return ipstr;
 }
 
+/**
+ * Parses the received packet to extract error code
+ * and error message if any sent by the server.
+ * Prints the same to the stderr
+ */
 void display_error_packet(char *rx_buf)
 {
     char *err_msg = rx_buf + TFTP_DATA_OFF;
@@ -283,6 +288,12 @@ size_t construct_next_packet(char *tx_buf, size_t prev_block)
     return tx_len;
 }
 
+/**
+ * Construct a packet mentioning the error code and message
+ * to be sent to the server, causing termination from server side
+ * 
+ * Returns size of the packet to be sent
+ */
 size_t construct_error_packet(char *tx_buf, TFTP_ERRCODE err_code, char *err_msg)
 {
     int tx_len = TFTP_DATA_OFF;
@@ -304,10 +315,10 @@ void perform_download()
     int ret = 0;
     int conn_fd = -1;
     struct pollfd pfd = {0};
-    struct in_addr saved_addr = {0};
  
     bool is_first_pkt = true;
     bool is_finished = false;
+    bool is_oack_exp = true;
 
     size_t e_block_num = 1;
     size_t r_block_num = 1;
@@ -333,7 +344,6 @@ void perform_download()
     memset(tx_buf, 0, BUF_SIZE);
     memset(rx_buf, 0, BUF_SIZE);
 
-    saved_addr.s_addr = g_sess_args.server.sin_addr.s_addr;
     conn_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (conn_fd < 0)
     {
@@ -348,6 +358,9 @@ send_packet:
         tx_len = construct_first_packet(tx_buf);
     else
         tx_len = construct_next_packet(tx_buf, r_block_num);
+
+    if (tx_len == (size_t)-1)
+        goto exit_transfer;
 
     retries = TFTP_NUM_RETRIES;
     wait_time = TFTP_TIMEOUT_MS;
@@ -391,8 +404,10 @@ recv_again:
     if (is_first_pkt)
     {
         socklen_t s_len = SOCKADDR_SIZE;
+        struct in_addr saved_addr = {0};
 
         is_first_pkt = false;
+        saved_addr.s_addr = g_sess_args.server.sin_addr.s_addr;
         bytes_read = recvfrom(conn_fd, rx_buf, BUF_SIZE, 0, g_sess_args.addr, &s_len);
         if (saved_addr.s_addr != g_sess_args.server.sin_addr.s_addr)
         {
@@ -467,7 +482,6 @@ void perform_upload()
     int ret = 0;
     int conn_fd = -1;
     struct pollfd pfd = {0};
-    struct in_addr saved_addr = {0};
  
     bool is_first_pkt = true;
     bool is_finished = false;
@@ -496,7 +510,6 @@ void perform_upload()
     memset(tx_buf, 0, BUF_SIZE);
     memset(rx_buf, 0, BUF_SIZE);
 
-    saved_addr.s_addr = g_sess_args.server.sin_addr.s_addr;
     conn_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (conn_fd < 0)
     {
@@ -514,8 +527,12 @@ send_packet:
     
     if (tx_len == (size_t) -1)
     {
+        if(!is_first_pkt)
+    {
         tx_len = construct_error_packet(tx_buf, EUNDEF, "read");
         goto send_err_packet;
+        }
+        goto exit_transfer;
     }
     else if (!is_first_pkt && tx_len < BUF_SIZE)
     {
@@ -559,8 +576,10 @@ recv_again:
     if (is_first_pkt)
     {
         socklen_t s_len = SOCKADDR_SIZE;
+        struct in_addr saved_addr = {0};
 
         is_first_pkt = false;
+        saved_addr.s_addr = g_sess_args.server.sin_addr.s_addr;
         bytes_read = recvfrom(conn_fd, rx_buf, BUF_SIZE, 0, g_sess_args.addr, &s_len);
         if (saved_addr.s_addr != g_sess_args.server.sin_addr.s_addr)
         {
@@ -614,8 +633,6 @@ send_err_packet:
     bytes_sent = sendto(conn_fd, tx_buf, tx_len, 0, g_sess_args.addr, SOCKADDR_SIZE);
 
 exit_transfer:
-    fflush(stderr);
-    fflush(stdout);
     close(conn_fd);
     close(g_sess_args.local_fd);
     free(tx_buf);
@@ -760,6 +777,9 @@ int main(int argc, char *argv[])
         perform_download();
     else if(g_sess_args.action == CODE_WRQ)
         perform_upload();
+
+    fflush(stderr);
+    fflush(stdout);
 
     return 0;
 }

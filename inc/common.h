@@ -72,6 +72,12 @@ typedef struct in_addr *ipv4addr;
 #define TFTP_MAXTIMEOUT_MS        3000
 #define TFTP_NUM_RETRIES            12
 
+#define BLKSIZE_OP      "blksize"
+#define BLKSIZE_OPLEN   7
+#define TSIZE_OP        "tsize"
+#define TSIZE_OPLEN     5
+
+
 typedef enum
 {
     CODE_UNDEF = 0,
@@ -139,5 +145,6 @@ int register_sighandler(void (*handler_func)(int));
 bool is_valid_blocksize(char *size, size_t *block_size);
 size_t tftp_mode_to_str(TFTP_MODE mode, char **mode_str);
 const char *tftp_err_to_str(TFTP_ERRCODE err_code);
+char *get_oack_option(const char *opt, char *oack_str, ssize_t len);
 
 #endif

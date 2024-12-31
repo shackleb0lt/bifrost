@@ -99,6 +99,37 @@ bool is_valid_blocksize(char *size_str, size_t *block_size)
 }
 
 /**
+ * Scans the string received in OACK by client or in Request by server
+ * If an option with name opt is present return it's value as str
+ * 
+ * Returns NULL if such an option was not found  
+ */
+char *get_oack_option(const char *opt, char *oack_str, ssize_t len)
+{
+    int i = 0;
+    bool is_found = false;
+
+    while (i < len)
+    {
+        if (oack_str[i] == '\0')
+        {
+            if (is_found)
+                return oack_str;
+
+            if (strcmp(oack_str, opt) == 0)
+                is_found = true;
+
+            i++;
+            oack_str += i;
+            len -= i;
+            i = -1;
+        }
+        i++;
+    }
+    return NULL;
+}
+
+/**
  * Function to register signal handler during initialisation
  * allows to catch interrupt signals and gracefully exit
  */
