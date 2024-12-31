@@ -73,9 +73,9 @@ typedef struct in_addr *ipv4addr;
 #define TFTP_NUM_RETRIES            12
 
 #define BLKSIZE_OP      "blksize"
-#define BLKSIZE_OPLEN   7
+#define BLKSIZE_OPLEN   8
 #define TSIZE_OP        "tsize"
-#define TSIZE_OPLEN     5
+#define TSIZE_OPLEN     6
 
 
 typedef enum

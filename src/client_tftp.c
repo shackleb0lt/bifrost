@@ -98,6 +98,7 @@ int parse_parameters()
                 return -1;
             }
             strncat(g_sess_args.remote_name, filename, len);
+            g_sess_args.remote_len += len; 
         }
 
         if (stat(g_sess_args.local_name, &st) == -1)
@@ -137,6 +138,7 @@ int parse_parameters()
                 return -1;
             }
             strncat(g_sess_args.local_name, filename, len);
+            g_sess_args.local_len += len;
         }
         g_sess_args.local_fd = open(g_sess_args.local_name, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     }
@@ -232,6 +234,87 @@ void display_error_packet(char *rx_buf)
         fprintf(stderr, "server error: %s\n", err_msg);
 }
 
+/**
+ * Allocates buffer memory for tx and rx packets
+ * Releases previous dynamic memory before allocating new one
+ * 
+ * Returns 0 on failure, else buffer size on success
+ */
+size_t allocate_packet_buf(char **buf1, char **buf2)
+{
+    char *tx_buf = *buf1;
+    char *rx_buf = *buf2;
+    size_t SIZE = g_sess_args.block_size + TFTP_DATA_OFF;
+
+    if (tx_buf)
+        free(tx_buf);
+    if (rx_buf)
+        free(rx_buf);
+
+    tx_buf = (char *)malloc(SIZE);
+    if (!tx_buf)
+    {
+        (*buf1) = NULL;
+        (*buf2) = NULL;
+        fprintf(stderr, "Failed to allocate memory: %s\n", strerror(errno));
+        return 0;
+    }
+
+    rx_buf = (char *)malloc(SIZE);
+    if (!rx_buf)
+    {
+        (*buf1) = NULL;
+        (*buf2) = NULL;
+        free(tx_buf);
+        fprintf(stderr, "Failed to allocate memory: %s\n", strerror(errno));
+        return 0;
+    }
+
+    memset(tx_buf, 0, SIZE);
+    memset(rx_buf, 0, SIZE);
+
+    (*buf1) = tx_buf;
+    (*buf2) = rx_buf;
+    return SIZE;
+}
+
+/**
+ * Parse the received string in OACK packet
+ * for the options acknowledged by the server
+ * 
+ * Returns -1 on error, 0 otherwise
+ */
+int recieve_oack_packet(char *args, ssize_t len)
+{
+    char *val = NULL;
+
+    val = get_oack_option("tsize", args, len);
+    if (val && g_sess_args.action == CODE_RRQ)
+        g_sess_args.file_size = (off_t)strtoull(val, NULL, 10);
+    
+    if (g_sess_args.block_size == DEF_BLK_SIZE)
+        return 0;
+
+    val = get_oack_option("blksize", args, len);
+    if (val == NULL)
+    {
+        g_sess_args.block_size = DEF_BLK_SIZE;
+        return 0;
+    }
+
+    if(!is_valid_blocksize(val, &(g_sess_args.block_size)))
+        return -1;
+
+    return 0;
+}
+
+/**
+ * Function that sets up the socket for future communication
+ * Also performs some security check to be sure packet
+ * originated from intended source.
+ * 
+ * Returns the size of the data read in first packet, -1 on error.
+ */
 ssize_t receive_first_packet(int conn_fd, char *rx_buf, size_t BUF_SIZE)
 {
     int ret = 0;
@@ -321,20 +404,21 @@ size_t construct_next_packet(char *tx_buf, size_t prev_block)
  * 
  * Returns size of the packet to be sent
  */
-size_t construct_error_packet(char *tx_buf, TFTP_ERRCODE err_code, char *err_msg)
+size_t construct_error_packet(char *tx_buf, TFTP_ERRCODE err_code, char *err_msg, bool is_op)
 {
     int tx_len = TFTP_DATA_OFF;
     char *curr_ptr = tx_buf + TFTP_DATA_OFF;
     set_opcode(tx_buf, CODE_ERROR);
     set_blocknum(tx_buf, err_code);
 
-    if(err_msg)
+    if (err_msg)
         tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "%s: %s", strerror(errno), err_msg);
     else
         tx_len += snprintf(curr_ptr, g_sess_args.block_size - 1, "%s", tftp_err_to_str(err_code));
 
-    fprintf(stderr, "%s\n", curr_ptr);   
-    return (size_t) tx_len;
+    if(is_op)
+        fprintf(stderr, "%s\n", curr_ptr);
+    return (size_t)tx_len;
 }
 
 void perform_download()
@@ -358,18 +442,12 @@ void perform_download()
     int retries = TFTP_NUM_RETRIES;
     int wait_time = TFTP_TIMEOUT_MS;
 
-    size_t BUF_SIZE = g_sess_args.block_size + TFTP_DATA_OFF;
-    char *tx_buf = (char *)malloc(BUF_SIZE);
-    char *rx_buf = (char *)malloc(BUF_SIZE);
+    char *tx_buf = NULL;
+    char *rx_buf = NULL;
 
-    if (!tx_buf || !rx_buf)
-    {
-        fprintf(stderr, "Failed to allocate memory: %s\n", strerror(errno));
+    size_t BUF_SIZE = allocate_packet_buf(&tx_buf, &rx_buf);
+    if (!BUF_SIZE)
         return;
-    }
-
-    memset(tx_buf, 0, BUF_SIZE);
-    memset(rx_buf, 0, BUF_SIZE);
 
     conn_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (conn_fd < 0)
@@ -424,7 +502,7 @@ recv_again:
     }
     else if (ret < 0)
     {
-        tx_len = construct_error_packet(tx_buf, EUNDEF, "epoll");
+        tx_len = construct_error_packet(tx_buf, EUNDEF, "epoll", true);
         goto send_err_packet;
     }
 
@@ -440,7 +518,7 @@ recv_again:
         bytes_read = recv(conn_fd, rx_buf, BUF_SIZE, 0);
         if (bytes_read <= 0)
         {
-            tx_len = construct_error_packet(tx_buf, EUNDEF, "recv");
+            tx_len = construct_error_packet(tx_buf, EUNDEF, "recv", true);
             goto send_err_packet;
         }
     }
@@ -453,11 +531,10 @@ recv_again:
         if (r_block_num == e_block_num)
         {
             char *data = rx_buf + TFTP_DATA_OFF;
-            bytes_sent = write(g_sess_args.local_fd, data, (size_t)(bytes_read - 4));
-            e_block_num++;
-            if (bytes_sent != (bytes_read - 4))
+            bytes_sent = write(g_sess_args.local_fd, data, (size_t)(bytes_read - TFTP_DATA_OFF));
+            if (bytes_sent != (bytes_read - TFTP_DATA_OFF))
             {
-                tx_len = construct_error_packet(tx_buf, ENOSPACE, "write");
+                tx_len = construct_error_packet(tx_buf, ENOSPACE, "write", true);
                 goto send_err_packet;
             }
 
@@ -465,6 +542,8 @@ recv_again:
 
             if ((size_t)(bytes_read - 4) < g_sess_args.block_size)
                 is_finished = true;
+
+            e_block_num++;
             goto send_packet;
         }
     }
@@ -509,18 +588,12 @@ void perform_upload()
     int retries = TFTP_NUM_RETRIES;
     int wait_time = TFTP_TIMEOUT_MS;
 
-    size_t BUF_SIZE = g_sess_args.block_size + TFTP_DATA_OFF;
-    char *tx_buf = (char *)malloc(BUF_SIZE);
-    char *rx_buf = (char *)malloc(BUF_SIZE);
+    char *tx_buf = NULL;
+    char *rx_buf = NULL;
 
-    if (!tx_buf || !rx_buf)
-    {
-        fprintf(stderr, "Failed to allocate memory: %s\n", strerror(errno));
+    size_t BUF_SIZE = allocate_packet_buf(&tx_buf, &rx_buf);
+    if (!BUF_SIZE)
         return;
-    }
-
-    memset(tx_buf, 0, BUF_SIZE);
-    memset(rx_buf, 0, BUF_SIZE);
 
     conn_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (conn_fd < 0)
@@ -541,7 +614,7 @@ send_packet:
     tx_len = construct_next_packet(tx_buf, r_block_num);
     if (tx_len == (size_t)-1)
     {
-        tx_len = construct_error_packet(tx_buf, EUNDEF, "read");
+        tx_len = construct_error_packet(tx_buf, EUNDEF, "read", true);
         goto send_err_packet;
     }
     else if (!is_first_pkt && tx_len < BUF_SIZE)
@@ -579,7 +652,7 @@ recv_again:
     }
     else if (ret < 0)
     {
-        tx_len = construct_error_packet(tx_buf, EUNDEF, "epoll");
+        tx_len = construct_error_packet(tx_buf, EUNDEF, "epoll", true);
         goto send_err_packet;
     }
 
@@ -595,7 +668,7 @@ recv_again:
         bytes_read = recv(conn_fd, rx_buf, BUF_SIZE, 0);
         if (bytes_read <= 0)
         {
-            tx_len = construct_error_packet(tx_buf, EUNDEF, "recv");
+            tx_len = construct_error_packet(tx_buf, EUNDEF, "recv", true);
             goto send_err_packet;
         }
     }
