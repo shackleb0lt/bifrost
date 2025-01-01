@@ -77,6 +77,8 @@ typedef struct in_addr *ipv4addr;
 #define TSIZE_OP        "tsize"
 #define TSIZE_OPLEN     5 
 
+#define PROG_BAR_LEN    64
+#define UPDATE_DIFF     1024*128
 
 typedef enum
 {

@@ -23,7 +23,7 @@
 
 #include "common.h"
 
-bool is_prog_bar = false;
+bool is_prog_bar = true;
 char *g_exe_name = NULL;
 tftp_session g_sess_args;
 
@@ -213,6 +213,59 @@ char *get_dest_addr(const char *input, struct sockaddr_in *dest_addr)
     freeaddrinfo(res);
     inet_ntop(AF_INET, &(dest_addr->sin_addr), ipstr, INET_ADDRSTRLEN);
     return ipstr;
+}
+
+/**
+ * Function that prints a progress bar to display 
+ * the transfer rate to the user.
+ */
+void update_prog_bar(TFTP_PROGRESS ptype)
+{
+    static size_t p_size = 0;
+    static size_t p_per = 0;
+    static bool is_init = false;
+    static char p_bar[PROG_BAR_LEN + 1] = {0};
+
+    size_t c_per = 0;
+    int index = 0;
+    if (!is_init && ptype == PROG_START)
+    {
+        is_init = true;
+        p_per = 0;
+        memset(p_bar, ' ', PROG_BAR_LEN);
+        printf("\r[%s] %lu%% (%lu) bytes", p_bar, c_per, g_sess_args.curr_size);
+        fflush(stdout);
+    }
+
+    if (!is_init)
+        return;
+    
+    if(ptype == PROG_FINISH)
+    {
+        c_per = (100 * g_sess_args.curr_size) / g_sess_args.file_size;
+        memset(p_bar, '=', PROG_BAR_LEN);
+        printf("\r[%s] %lu%% (%lu) bytes\n", p_bar, c_per, g_sess_args.curr_size);
+        fflush(stdout);
+    }
+    else if(ptype == PROG_ERROR)
+    {
+        printf("\n");
+        fflush(stdout);
+    }
+    else if(ptype == PROG_UPDATE)
+    {
+        c_per = (100 * g_sess_args.curr_size) / g_sess_args.file_size;
+        index = PROG_BAR_LEN * c_per / 100;
+
+        memset(p_bar, '=', index);
+        if(c_per > p_per || g_sess_args.curr_size > (p_size + UPDATE_DIFF))
+        {
+            printf("\r[%s] %lu%% (%lu) bytes", p_bar, c_per, g_sess_args.curr_size);
+            fflush(stdout);
+            p_per = c_per;
+            p_size = g_sess_args.curr_size;
+        }
+    }
 }
 
 /**
@@ -520,6 +573,7 @@ send_again:
 
     if (is_finished)
     {
+        update_prog_bar(PROG_FINISH);
         goto exit_transfer;
     }
 
@@ -587,6 +641,9 @@ recv_again:
                 goto exit_transfer;
         }
 
+        if(g_sess_args.file_size)
+            update_prog_bar(PROG_START);
+
         if (r_opcode == CODE_OACK)
         {
             // To send ACK 0 for the OACK
@@ -609,6 +666,7 @@ recv_again:
             }
 
             g_sess_args.curr_size += bytes_sent;
+            update_prog_bar(PROG_UPDATE);
 
             if ((size_t)(bytes_read - 4) < g_sess_args.block_size)
                 is_finished = true;
@@ -772,6 +830,7 @@ recv_again:
         {
             // Expect ACK 1 instead of ACK 0
             // After Option negotiation
+            update_prog_bar(PROG_START);
             e_block_num = 1;
             goto send_packet;
         }
@@ -781,14 +840,18 @@ recv_again:
     if (r_opcode == CODE_ACK)
     {
         r_block_num = get_blocknum(rx_buf);
+        if(e_block_num == 0)
+            update_prog_bar(PROG_START);
+
         if (r_block_num == e_block_num)
         {
-            g_sess_args.curr_size += bytes_sent;
+            g_sess_args.curr_size += (bytes_sent - TFTP_DATA_OFF);
             if (is_finished)
             {
+                update_prog_bar(PROG_FINISH);
                 goto exit_transfer;
             }
-
+            update_prog_bar(PROG_UPDATE);
             e_block_num++;
             goto send_packet;
         }
