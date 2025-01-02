@@ -116,7 +116,7 @@ char *get_oack_option(const char *opt, char *oack_str, ssize_t len)
             if (is_found)
                 return oack_str;
 
-            if (strcmp(oack_str, opt) == 0)
+            if (strcasecmp(oack_str, opt) == 0)
                 is_found = true;
 
             i++;

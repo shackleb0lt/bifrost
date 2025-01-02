@@ -258,7 +258,7 @@ void update_prog_bar(TFTP_PROGRESS ptype)
         index = PROG_BAR_LEN * c_per / 100;
 
         memset(p_bar, '=', index);
-        if(c_per > p_per || g_sess_args.curr_size > (p_size + UPDATE_DIFF))
+        if(c_per > p_per || (size_t) g_sess_args.curr_size > (p_size + UPDATE_DIFF))
         {
             printf("\r[%s] %lu%% (%lu) bytes", p_bar, c_per, g_sess_args.curr_size);
             fflush(stdout);
