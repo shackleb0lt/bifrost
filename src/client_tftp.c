@@ -179,15 +179,26 @@ void handle_signal(int sig)
  * network form and stores in dest_addr pointer.
  * @returns A static string which hold presentation form
  */
-char *get_dest_addr(const char *input, struct sockaddr_in *dest_addr)
+char *get_dest_addr(const char *input, char *port_no, struct sockaddr_in *dest_addr)
 {
     int ret = 0;
+    unsigned long port = TFTP_PORT_NO;
     struct addrinfo hint;
     struct addrinfo *res;
     static char ipstr[INET_ADDRSTRLEN] = {0};
 
+    if(port_no)
+    {
+        port = strtoul(port_no, NULL, 10);
+        if (port == 0 || errno)
+            return NULL;
+        else if(port > 65535)
+            return NULL;
+    }
+    
+    dest_addr->sin_port = htons((in_port_t) port);
+
     dest_addr->sin_family = AF_INET;
-    dest_addr->sin_port = htons(TFTP_PORT_NO);
 
     // Check if string is of the form "X.X.X.X"
     ret = inet_pton(AF_INET, input, &(dest_addr->sin_addr));
@@ -227,7 +238,7 @@ void update_prog_bar(TFTP_PROGRESS ptype)
     static char p_bar[PROG_BAR_LEN + 1] = {0};
 
     size_t c_per = 0;
-    int index = 0;
+    size_t       index = 0;
     if (!is_init && ptype == PROG_START)
     {
         is_init = true;
@@ -996,10 +1007,13 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    hostname = get_dest_addr(argv[optind], &(g_sess_args.server));
+    hostname = get_dest_addr(argv[optind], argv[optind + 1], &(g_sess_args.server));
     if (hostname == NULL)
     {
-        fprintf(stderr, "Destination IP %s could not be resolved\n", argv[optind]);
+        if(argv[optind + 1])
+            fprintf(stderr, "Destination IP %s port %s could not be resolved\n", argv[optind], argv[optind + 1]);
+        else
+            fprintf(stderr, "Destination IP %s could not be resolved\n", argv[optind]);
         return EXIT_FAILURE;
     }
 
