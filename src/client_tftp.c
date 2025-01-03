@@ -21,7 +21,7 @@
  * SOFTWARE.
  */
 
-#include "common.h"
+#include "client_tftp.h"
 
 bool is_prog_bar = true;
 char *g_exe_name = NULL;
@@ -286,7 +286,7 @@ void update_prog_bar(TFTP_PROGRESS ptype)
  */
 void display_error_packet(char *rx_buf)
 {
-    char *err_msg = rx_buf + TFTP_DATA_OFF;
+    char *err_msg = rx_buf + DATA_HDR_LEN;
     TFTP_ERRCODE err_code = get_blocknum(rx_buf);
     size_t len = strnlen(err_msg, g_sess_args.block_size - 1);
 
@@ -308,7 +308,7 @@ size_t allocate_packet_buf(char **buf1, char **buf2)
 {
     char *tx_buf = *buf1;
     char *rx_buf = *buf2;
-    size_t SIZE = g_sess_args.block_size + TFTP_DATA_OFF;
+    size_t SIZE = g_sess_args.block_size + DATA_HDR_LEN;
 
     if (tx_buf)
         free(tx_buf);
@@ -352,14 +352,14 @@ int recieve_oack_packet(char *args, ssize_t len)
 {
     char *val = NULL;
 
-    val = get_oack_option("tsize", args, len);
+    val = get_option_val("tsize", args, len);
     if (val && g_sess_args.action == CODE_RRQ)
         g_sess_args.file_size = (off_t)strtoull(val, NULL, 10);
     
     if (g_sess_args.block_size == DEF_BLK_SIZE)
         return 0;
 
-    val = get_oack_option("blksize", args, len);
+    val = get_option_val("blksize", args, len);
     if (val == NULL)
     {
         g_sess_args.block_size = DEF_BLK_SIZE;
@@ -420,7 +420,7 @@ size_t construct_first_packet(char *tx_buf)
     int op_len = 0;
     size_t tx_len = 0;
     char op_buf[16] = {0};
-    char *curr_ptr = tx_buf + TFTP_ARGS_OFF;
+    char *curr_ptr = tx_buf + ARGS_HDR_LEN;
 
     set_opcode(tx_buf, g_sess_args.action);
 
@@ -481,9 +481,9 @@ size_t construct_next_packet(char *tx_buf, size_t prev_block)
 {
     size_t tx_len = 0;
     ssize_t bytes_read = 0;
-    char *curr_ptr = tx_buf + TFTP_DATA_OFF;
+    char *curr_ptr = tx_buf + DATA_HDR_LEN;
 
-    tx_len = TFTP_DATA_OFF;
+    tx_len = DATA_HDR_LEN;
     if(g_sess_args.action == CODE_RRQ)
     {
         set_opcode(tx_buf, CODE_ACK);
@@ -510,8 +510,8 @@ size_t construct_next_packet(char *tx_buf, size_t prev_block)
  */
 size_t construct_error_packet(char *tx_buf, TFTP_ERRCODE err_code, char *err_msg, bool is_op)
 {
-    int tx_len = TFTP_DATA_OFF;
-    char *curr_ptr = tx_buf + TFTP_DATA_OFF;
+    int tx_len = DATA_HDR_LEN;
+    char *curr_ptr = tx_buf + DATA_HDR_LEN;
     set_opcode(tx_buf, CODE_ERROR);
     set_blocknum(tx_buf, err_code);
 
@@ -635,7 +635,7 @@ recv_again:
         is_oack_exp = false;
         if (r_opcode == CODE_OACK)
         {
-            ret = recieve_oack_packet(rx_buf + TFTP_ARGS_OFF, bytes_read - TFTP_ARGS_OFF);
+            ret = recieve_oack_packet(rx_buf + ARGS_HDR_LEN, bytes_read - ARGS_HDR_LEN);
             if (ret == -1)
             {
                 tx_len = construct_error_packet(tx_buf, EBADOPT, NULL, false);
@@ -645,7 +645,7 @@ recv_again:
         else 
             g_sess_args.block_size = DEF_BLK_SIZE;
 
-        if (g_sess_args.block_size != (BUF_SIZE - TFTP_DATA_OFF))
+        if (g_sess_args.block_size != (BUF_SIZE - DATA_HDR_LEN))
         {
             BUF_SIZE = allocate_packet_buf(&tx_buf, &rx_buf);
             if(!BUF_SIZE)
@@ -668,9 +668,9 @@ recv_again:
         r_block_num = get_blocknum(rx_buf);
         if (r_block_num == e_block_num)
         {
-            char *data = rx_buf + TFTP_DATA_OFF;
-            bytes_sent = write(g_sess_args.local_fd, data, (size_t)(bytes_read - TFTP_DATA_OFF));
-            if (bytes_sent != (bytes_read - TFTP_DATA_OFF))
+            char *data = rx_buf + DATA_HDR_LEN;
+            bytes_sent = write(g_sess_args.local_fd, data, (size_t)(bytes_read - DATA_HDR_LEN));
+            if (bytes_sent != (bytes_read - DATA_HDR_LEN))
             {
                 tx_len = construct_error_packet(tx_buf, ENOSPACE, "write", true);
                 goto send_err_packet;
@@ -820,7 +820,7 @@ recv_again:
         is_oack_exp = false;
         if (r_opcode == CODE_OACK)
         {
-            ret = recieve_oack_packet(rx_buf + TFTP_ARGS_OFF, bytes_read - TFTP_ARGS_OFF);
+            ret = recieve_oack_packet(rx_buf + ARGS_HDR_LEN, bytes_read - ARGS_HDR_LEN);
             if (ret == -1)
             {
                 tx_len = construct_error_packet(tx_buf, EBADOPT, NULL, false);
@@ -830,7 +830,7 @@ recv_again:
         else
             g_sess_args.block_size = DEF_BLK_SIZE;
 
-        if (g_sess_args.block_size != (BUF_SIZE - TFTP_DATA_OFF))
+        if (g_sess_args.block_size != (BUF_SIZE - DATA_HDR_LEN))
         {
             BUF_SIZE = allocate_packet_buf(&tx_buf, &rx_buf);
             if(!BUF_SIZE)
@@ -856,7 +856,7 @@ recv_again:
 
         if (r_block_num == e_block_num)
         {
-            g_sess_args.curr_size += (bytes_sent - TFTP_DATA_OFF);
+            g_sess_args.curr_size += (bytes_sent - DATA_HDR_LEN);
             if (is_finished)
             {
                 update_prog_bar(PROG_FINISH);

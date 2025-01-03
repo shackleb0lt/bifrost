@@ -21,10 +21,35 @@
  * SOFTWARE.
  */
 
-#include "serv_tftp.h"
+#ifndef CLIENT_TFTP_H
+#define CLIENT_TFTP_H
 
-int main()
+#include "common.h"
+
+#define PROG_BAR_LEN    64
+#define UPDATE_DIFF     1024*128
+
+typedef struct
 {
-    printf("TFTP server is not implemented yet\n");
-    return 0;
-}
+    char local_name[PATH_MAX];
+    char remote_name[PATH_LEN];
+
+    size_t local_len;
+    size_t remote_len;
+
+    char *mode_str;
+    size_t mode_len;
+
+    int local_fd;
+    off_t file_size;
+    off_t curr_size;
+
+    struct sockaddr_in server;
+    struct sockaddr *addr;
+
+    size_t block_size;
+    TFTP_OPCODE action;
+    TFTP_MODE mode;
+} tftp_session;
+
+#endif

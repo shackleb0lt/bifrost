@@ -21,10 +21,10 @@
  * SOFTWARE.
  */
 
-#include "serv_tftp.h"
+#ifndef SERV_TFTP_H
+#define SERV_TFTP_H
 
-int main()
-{
-    printf("TFTP server is not implemented yet\n");
-    return 0;
-}
+#include "common.h"
+#include <pthread.h>
+
+#endif

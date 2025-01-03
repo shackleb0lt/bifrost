@@ -1,10 +1,10 @@
 # Comment below line to see actual linker and compiler flags while running makefile
-.SILENT:
+# .SILENT:
 
 # Default Compiler and flags
 CC := gcc
 CFLAGS := -Wall -Wextra -Iinc
-LDLIBS := #-lpthread -lrt
+LDLIBS := -lpthread -Wl,--as-needed
 
 SRC_DIR := src
 INC_DIR := inc

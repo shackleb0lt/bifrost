@@ -23,7 +23,7 @@
 
 #include "common.h"
 
-const char * err_strs[] =
+const char *err_strs[] =
 {
     "Unknown error",
     "File not found",
@@ -104,7 +104,7 @@ bool is_valid_blocksize(char *size_str, size_t *block_size)
  * 
  * Returns NULL if such an option was not found  
  */
-char *get_oack_option(const char *opt, char *oack_str, ssize_t len)
+char *get_option_val(const char *opt, char *oack_str, ssize_t len)
 {
     int i = 0;
     bool is_found = false;

@@ -45,7 +45,6 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <netinet/ip_icmp.h>
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -57,7 +56,6 @@
 #define set_blocknum(buf, x) ((uint16_t *)buf)[1] = htons((uint16_t)(x))
 
 #define SOCKADDR_SIZE sizeof(struct sockaddr_in)
-typedef struct in_addr *ipv4addr;
 
 #define MIN_BLK_SIZE 8
 #define DEF_BLK_SIZE 512
@@ -65,8 +63,8 @@ typedef struct in_addr *ipv4addr;
 
 #define PATH_LEN        500
 #define TFTP_PORT_NO    69
-#define TFTP_DATA_OFF   4
-#define TFTP_ARGS_OFF   2
+#define DATA_HDR_LEN    4
+#define ARGS_HDR_LEN    2
 
 #define TFTP_TIMEOUT_MS            200
 #define TFTP_MAXTIMEOUT_MS        3000
@@ -75,10 +73,9 @@ typedef struct in_addr *ipv4addr;
 #define BLKSIZE_OP      "blksize"
 #define BLKSIZE_OPLEN   7
 #define TSIZE_OP        "tsize"
-#define TSIZE_OPLEN     5 
-
-#define PROG_BAR_LEN    64
-#define UPDATE_DIFF     1024*128
+#define TSIZE_OPLEN     5
+#define WINDOW_OP       "windowsize"
+#define WINDOW_OPLEN    10
 
 typedef enum
 {
@@ -119,34 +116,15 @@ typedef enum
     PROG_ERROR = 3,
 } TFTP_PROGRESS;
 
-typedef struct
-{
-    char local_name[PATH_MAX];
-    char remote_name[PATH_LEN];
-
-    size_t local_len;
-    size_t remote_len;
-
-    char *mode_str;
-    size_t mode_len;
-
-    int local_fd;
-    off_t file_size;
-    off_t curr_size;
-
-    struct sockaddr_in server;
-    struct sockaddr *addr;
-
-    size_t block_size;
-    TFTP_OPCODE action;
-    TFTP_MODE mode;
-} tftp_session;
-
 
 int register_sighandler(void (*handler_func)(int));
+
 bool is_valid_blocksize(char *size, size_t *block_size);
+
 size_t tftp_mode_to_str(TFTP_MODE mode, char **mode_str);
+
 const char *tftp_err_to_str(TFTP_ERRCODE err_code);
-char *get_oack_option(const char *opt, char *oack_str, ssize_t len);
+
+char *get_option_val(const char *opt, char *oack_str, ssize_t len);
 
 #endif
