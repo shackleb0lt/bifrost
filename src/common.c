@@ -122,9 +122,10 @@ char *get_option_val(const char *opt, char *oack_str, ssize_t len)
             i++;
             oack_str += i;
             len -= i;
-            i = -1;
+            i = 0;
         }
-        i++;
+        else
+            i++;
     }
     return NULL;
 }

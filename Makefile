@@ -1,5 +1,5 @@
 # Comment below line to see actual linker and compiler flags while running makefile
-# .SILENT:
+.SILENT:
 
 # Default Compiler and flags
 CC := gcc
