@@ -25,31 +25,22 @@
 #define CLIENT_TFTP_H
 
 #include "common.h"
+#include <pthread.h>
 
 #define PROG_BAR_LEN    64
-#define UPDATE_DIFF     1024*128
+#define UPDATE_DIFF     1024 * 128
+#define OPTION_LEN      32
 
 typedef struct
 {
     char local_name[PATH_MAX];
     char remote_name[PATH_LEN];
 
+    tftp_context tftp_ctx;
+
     size_t local_len;
     size_t remote_len;
 
-    char *mode_str;
-    size_t mode_len;
-
-    int local_fd;
-    off_t file_size;
-    off_t curr_size;
-
-    struct sockaddr_in server;
-    struct sockaddr *addr;
-
-    size_t block_size;
-    TFTP_OPCODE action;
-    TFTP_MODE mode;
-} tftp_session;
+} tftp_client;
 
 #endif

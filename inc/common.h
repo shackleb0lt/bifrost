@@ -57,14 +57,25 @@
 
 #define SOCKADDR_SIZE sizeof(struct sockaddr_in)
 
+#define DEF_WIN_SIZE 1
+#define MAX_WIN_SIZE 65535L
+
+#define MIN_PORT_NUM 0  
+#define MAX_PORT_NUM 65535
+
 #define MIN_BLK_SIZE 8
 #define DEF_BLK_SIZE 512
-#define MAX_BLK_SIZE 65464
+#define MAX_BLK_SIZE 65464L
+
+#define MAX_BLK_NUM 65535L
+
+#define MAX_FILE_SIZE (MAX_BLK_SIZE * MAX_BLK_NUM)
+
 
 #define PATH_LEN        500
 #define TFTP_PORT_NO    69
 #define DATA_HDR_LEN    4
-#define ARGS_HDR_LEN    2
+#define ARGS_HDR_LEN    2   
 
 #define TFTP_TIMEOUT_MS            200
 #define TFTP_MAXTIMEOUT_MS        3000
@@ -74,8 +85,14 @@
 #define BLKSIZE_OPLEN   7
 #define TSIZE_OP        "tsize"
 #define TSIZE_OPLEN     5
-#define WINDOW_OP       "windowsize"
-#define WINDOW_OPLEN    10
+#define WINSIZE_OP      "windowsize"
+#define WINSIZE_OPLEN   10
+
+#define LOG_INFO(fmt, ...) fprintf(stdout, "[INFO] "fmt"\n", ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...) fprintf(stderr, "[ERROR] "fmt"\n", ##__VA_ARGS__)
+
+typedef struct sockaddr s_addr;
+typedef struct sockaddr_in s4_addr;
 
 typedef enum
 {
@@ -116,15 +133,60 @@ typedef enum
     PROG_ERROR = 3,
 } TFTP_PROGRESS;
 
+typedef struct
+{
+    size_t BUF_SIZE;
+    char *tx_buf;
+    char *rx_buf;
+
+    size_t tx_len;
+    size_t rx_len; 
+
+    ssize_t b_recv;
+    ssize_t b_sent;
+
+    s4_addr addr;
+    socklen_t a_len;
+
+    int conn_sock;
+
+    int file_desc;
+
+    off_t file_size;
+    off_t curr_size;
+
+    size_t e_block_num;
+    size_t r_block_num;
+
+    size_t blk_size;
+    size_t win_size;
+
+    TFTP_MODE mode;
+    TFTP_OPCODE action;
+    TFTP_OPCODE prev_code;
+
+    TFTP_ERRCODE err_code;
+    char err_str[DEF_BLK_SIZE];
+} tftp_context;
 
 int register_sighandler(void (*handler_func)(int));
 
-bool is_valid_blocksize(char *size, size_t *block_size);
+bool is_valid_blocksize(const char *size, size_t *block_size);
+bool is_valid_windowsize(const char *size_str, size_t *win_size);
+bool is_valid_portnum(const char *size_str, uint16_t *port_num);
 
-size_t tftp_mode_to_str(TFTP_MODE mode, char **mode_str);
-
+size_t tftp_mode_to_str(TFTP_MODE mode, char mode_str[]);
 const char *tftp_err_to_str(TFTP_ERRCODE err_code);
 
-char *get_option_val(const char *opt, char *oack_str, ssize_t len);
+void handle_error_packet(char *buf, ssize_t buf_len);
+
+int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size, size_t win_size);
+int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_size, size_t *win_size);
+
+int init_tftp_context(tftp_context * ctx, TFTP_OPCODE action, size_t b_size, size_t w_size);
+void free_tftp_context(tftp_context * ctx);
+
+void tftp_send_file(tftp_context *ctx);
+void tftp_recv_file(tftp_context *ctx);
 
 #endif
