@@ -88,7 +88,7 @@ int parse_parameters()
 
         if (access(g_sess_args.local_name, F_OK | R_OK) != 0)
         {
-            fprintf(stderr, "%s: %s\n", g_sess_args.local_name, strerror(errno));
+            fprintf(stderr, "access %s: %s\n", g_sess_args.local_name, strerror(errno));
             return -1;
         }
 
@@ -108,7 +108,7 @@ int parse_parameters()
 
             if ((g_sess_args.remote_len + len) >= PATH_LEN)
             {
-                fprintf(stderr, "Destination file name %s%s is too long", g_sess_args.remote_name, filename);
+                fprintf(stderr, "Destination file name %s%s is too long\n", g_sess_args.remote_name, filename);
                 return -1;
             }
             strncat(g_sess_args.remote_name, filename, len);
@@ -117,7 +117,7 @@ int parse_parameters()
 
         if (stat(g_sess_args.local_name, &st) == -1)
         {
-            fprintf(stderr, "Could not stat file %s\n", g_sess_args.local_name);
+            fprintf(stderr, "stat %s : %s\n", g_sess_args.local_name, strerror(errno));
             return -1;
         }
 

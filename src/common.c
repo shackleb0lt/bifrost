@@ -304,11 +304,7 @@ int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_si
     if (file_size)
     {
         val = get_option_val(TSIZE_OP, buf, buf_len);
-        if (val == NULL)
-        {
-            *file_size = 0;
-        }
-        else if(is_valid_filesize(val, file_size) == false)
+        if(val && is_valid_filesize(val, file_size) == false)
         {
             LOG_ERROR("Received invalid file size %s", val);
             return -1;
@@ -344,22 +340,22 @@ int register_sighandler(void (*handler_func)(int))
 
     if (sigaction(SIGTERM, &sa, NULL) == -1)
     {
-        fprintf(stderr, "sigaction: SIGTERM");
+        LOG_ERROR("sigaction: SIGTERM: %s", strerror(errno));
         return -1;
     }
     if (sigaction(SIGINT, &sa, NULL) == -1)
     {
-        fprintf(stderr, "sigaction: SIGINT");
+        LOG_ERROR("sigaction: SIGINT: %s", strerror(errno));
         return -1;
     }
     if (sigaction(SIGHUP, &sa, NULL) == -1)
     {
-        fprintf(stderr, "sigaction: SIGHUP");
+        LOG_ERROR("sigaction: SIGHUP: %s", strerror(errno));
         return -1;
     }
     if (sigaction(SIGQUIT, &sa, NULL) == -1)
     {
-        fprintf(stderr, "sigaction: SIGHUP");
+        LOG_ERROR("sigaction: SIGHUP: %s", strerror(errno));
         return -1;
     }
     return 0;
@@ -443,12 +439,6 @@ ssize_t s_write(int fd, const void *buf, size_t count)
 
 int init_tftp_context(tftp_context *ctx, TFTP_OPCODE action, size_t blk_size, size_t w_size)
 {
-    if (ctx == NULL)
-    {
-        LOG_ERROR("%s: Received NULL context", __func__);
-        return -1;
-    }
-
     memset(ctx, 0, sizeof(tftp_context));
 
     ctx->conn_sock = -1;
@@ -460,17 +450,16 @@ int init_tftp_context(tftp_context *ctx, TFTP_OPCODE action, size_t blk_size, si
     ctx->win_size = w_size;
 
     ctx->tx_buf = (char *) malloc(ctx->BUF_SIZE);
-
     if (ctx->tx_buf == NULL)
     {
-        LOG_ERROR("%s: tx buffer allocation failed %s", __func__, strerror(errno));
+        LOG_ERROR("%s: malloc tx_buf: %s", __func__, strerror(errno));
         return -1;
     }
 
     ctx->rx_buf = (char *) malloc(ctx->BUF_SIZE);
     if (ctx->rx_buf == NULL)
     {
-        LOG_ERROR("%s: rx buffer allocation failed %s", __func__, strerror(errno));
+        LOG_ERROR("%s: malloc rx_buf: %s", __func__, strerror(errno));
         free(ctx->tx_buf);
         ctx->tx_buf = NULL;
         return -1;
@@ -509,13 +498,13 @@ void free_tftp_context(tftp_context *ctx)
     }
 }
 
-void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code)
+static void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code)
 {
     set_opcode(ctx->tx_buf, CODE_ERROR);
     set_blocknum(ctx->tx_buf, err_code);
 
     ctx->tx_len = DATA_HDR_LEN;
-    ctx->tx_len += snprintf(ctx->tx_buf + DATA_HDR_LEN, ctx->blk_size,"%s", tftp_err_to_str(err_code));
+    ctx->tx_len += (size_t) snprintf(ctx->tx_buf + DATA_HDR_LEN, ctx->blk_size,"%s", tftp_err_to_str(err_code));
     send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
 }
 
@@ -569,7 +558,7 @@ recv_again:
     retries--;
     if (retries == 0)
     {
-        fprintf(stderr, "TFTP timeout\n");
+        LOG_ERROR("TFTP timeout\n");
         return;
     }
 
@@ -683,7 +672,7 @@ recv_again:
     retries--;
     if (retries == 0)
     {
-        fprintf(stderr, "TFTP timeout\n");
+        LOG_ERROR("TFTP timeout\n");
         return;
     }
 

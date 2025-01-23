@@ -88,8 +88,8 @@
 #define WINSIZE_OP      "windowsize"
 #define WINSIZE_OPLEN   10
 
-#define LOG_INFO(fmt, ...) fprintf(stdout, "[INFO] "fmt"\n", ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...) fprintf(stderr, "[ERROR] "fmt"\n", ##__VA_ARGS__)
+#define LOG_INFO(fmt, ...) do { fprintf(stdout, "[INFO] "fmt"\n", ##__VA_ARGS__); fflush(stdout);} while (false) 
+#define LOG_ERROR(fmt, ...) do { fprintf(stderr, "[ERROR] "fmt"\n", ##__VA_ARGS__); fflush(stderr);} while (false)
 
 typedef struct sockaddr s_addr;
 typedef struct sockaddr_in s4_addr;

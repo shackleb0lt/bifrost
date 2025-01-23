@@ -23,8 +23,354 @@
 
 #include "serv_tftp.h"
 
-int main()
+bool g_running = true;
+
+void handle_signal(int sig)
 {
-    printf("TFTP server is not implemented yet\n");
+    struct sigaction sa;
+    sa.sa_flags = 0;
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sigaction(sig, &sa, NULL);
+
+    g_running = false;
+}
+
+int redirect_output()
+{
+    int fd = open(TFTP_SERVER_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+    if (fd < 0)
+    {
+        fprintf(stderr, "Failed to initialise log file, open: %s\n", strerror(errno));
+        return -1;
+    }
+
+    if (dup2(fd, STDOUT_FILENO) < 0)
+    {
+        fprintf(stderr, "dup2 stdout: %s\n", strerror(errno));
+        close(fd);
+        return -1;
+    }
+
+    if (dup2(fd, STDERR_FILENO) < 0)
+    {
+        fprintf(stderr, "dup2 stderr: %s\n", strerror(errno));
+        close(fd);
+        return -1;
+    }
+
+    close(fd);
     return 0;
 }
+
+int initiate_server()
+{
+    int sock_fd = -1;
+
+    s4_addr saddr = {0};
+    socklen_t sa_len = SOCKADDR_SIZE;
+
+    memset(&saddr, 0, sa_len);
+    saddr.sin_family = AF_INET;
+    saddr.sin_port = htons(TFTP_SERVER_PORT);
+    saddr.sin_addr.s_addr = INADDR_ANY;
+
+    sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock_fd < 0)
+    {
+        LOG_ERROR("socket: %s", strerror(errno));
+        return -1;
+    }
+
+    if (bind(sock_fd, (s_addr *)&saddr, sa_len) < 0)
+    {
+        LOG_ERROR("bind: %s", strerror(errno));
+        close(sock_fd);
+        return -1;
+    }
+
+    return sock_fd;
+}
+
+int connect_to_client(tftp_context *ctx)
+{
+    ctx->conn_sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (ctx->conn_sock < 0)
+    {
+        LOG_ERROR("client socket: %s", strerror(errno));
+        return -1;
+    }
+
+    if (connect(ctx->conn_sock, (s_addr *)&(ctx->addr), SOCKADDR_SIZE) < 0)
+    {
+        LOG_ERROR("client connect: %s", strerror(errno));
+        close(ctx->conn_sock);
+        return -1;
+    }
+
+    return 0;
+}
+
+static void send_error_packet(int sock, TFTP_ERRCODE err_code)
+{
+    size_t len = 0;
+    char buf[DATA_HDR_LEN + DEF_BLK_SIZE] = {0};
+
+    set_opcode(buf, CODE_ERROR);
+    set_blocknum(buf, err_code);
+    len += DATA_HDR_LEN;
+    len += (size_t) snprintf(buf + DATA_HDR_LEN, DEF_BLK_SIZE, "%s", tftp_err_to_str(err_code));
+    send(sock, buf, len, 0);
+}
+
+size_t parse_filename(tftp_context *ctx, char *filename)
+{
+    struct stat st = {0};
+    char temp[PATH_MAX] = {0};
+    char fullname[PATH_MAX] = {0};
+
+    snprintf(temp, PATH_MAX, "%s%s", TFTP_SERVER_PATH, filename);
+    if (realpath(temp, fullname) == NULL)
+    {
+        LOG_ERROR("Invalid filename %s: %s", temp, strerror(errno));
+        send_error_packet(ctx->conn_sock, ENOTFOUND);
+        return 0;
+    }
+
+    if (strncmp(fullname, TFTP_SERVER_PATH, strlen(TFTP_SERVER_PATH)) != 0)
+    {
+        LOG_ERROR("Illegal attempt to access %s", fullname);
+        send_error_packet(ctx->conn_sock, EACCESS);
+        return 0;
+    }
+
+    if (ctx->action == CODE_RRQ)
+    {
+        if (stat(fullname, &st) == -1)
+        {
+            LOG_ERROR("stat %s: %s", fullname, strerror(errno));
+            return 0;
+        }
+        ctx->file_size = st.st_size;
+        ctx->file_desc = open(filename, O_RDONLY);
+    }
+    else if (ctx->action == CODE_WRQ)
+    {
+        ctx->file_size = 0;
+        ctx->file_desc = open(filename, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+    }
+
+    if (ctx->file_desc < 0)
+    {
+        LOG_ERROR("open %s: %s", filename, strerror(errno));
+        return 0;
+    }
+
+    return strlen(filename) + 1;
+}
+
+int validate_parameters(tftp_context *ctx, char *buf, size_t len)
+{
+    off_t temp_size = -1;
+    size_t curr_len = 0;
+
+    ctx->blk_size = DEF_BLK_SIZE;
+    ctx->win_size = DEF_WIN_SIZE;
+
+    curr_len = parse_filename(ctx, buf);
+    if (curr_len == 0)
+        return -1;
+    else if (curr_len == len)
+        return 0;
+    
+    buf += curr_len;
+    len -= curr_len;
+
+    curr_len = strlen(buf) + 1;
+    if (curr_len == len)
+        return 0;
+
+    buf += curr_len;
+    len -= curr_len;
+
+    if (extract_options(buf, len, &ctx->blk_size, &temp_size, &ctx->win_size) < 0)
+    {
+        close(ctx->file_desc);
+        return -1;
+    }
+
+    if (temp_size == -1)
+        ctx->file_size = -1;
+    else if (ctx->action == CODE_WRQ)
+        ctx->file_size = temp_size;
+    
+    ctx->BUF_SIZE = ctx->blk_size + DATA_HDR_LEN;
+    ctx->tx_buf = (char *) malloc(ctx->BUF_SIZE);
+    if (ctx->tx_buf == NULL)
+    {
+        LOG_ERROR("%s: malloc tx_buf: %s", __func__, strerror(errno));
+        close(ctx->file_desc);
+        return -1;
+    }
+
+    ctx->rx_buf = (char *) malloc(ctx->BUF_SIZE);
+    if (ctx->rx_buf == NULL)
+    {
+        LOG_ERROR("%s: malloc rx_buf: %s", __func__, strerror(errno));
+        close(ctx->file_desc);
+        free(ctx->tx_buf);
+        return -1;
+    }
+
+    memset(ctx->tx_buf, 0, ctx->BUF_SIZE);
+    memset(ctx->rx_buf, 0, ctx->BUF_SIZE);
+
+    return 0;
+}
+
+void *handle_tftp_request(void *arg)
+{
+    tftp_request *req = (tftp_request *)arg;
+    tftp_context ctx = {0};
+    int ret = 0;
+
+    memset(&ctx, 0, sizeof(tftp_context));
+    ctx.a_len = SOCKADDR_SIZE;
+    memcpy(&(ctx.addr), &(req->client_addr), ctx.a_len);
+
+    ret = connect_to_client(&ctx);
+    if (ret < 0)
+        return NULL;
+
+    if (req->data_len <= ARGS_HDR_LEN)
+    {
+        send_error_packet(ctx.conn_sock, EBADOP);
+        goto exit_transfer;
+    }
+
+    req->data[REQUEST_SIZE - 1] = '\0';
+
+    ctx.action = get_opcode(req->data);
+    if (ctx.action != CODE_RRQ && ctx.action != CODE_WRQ)
+    {
+        send_error_packet(ctx.conn_sock, EBADOP);
+        goto exit_transfer;
+    }
+
+    ret = validate_parameters(&ctx, req->data + ARGS_HDR_LEN, (size_t)req->data_len - ARGS_HDR_LEN);
+    if (ret < 0)
+    {
+        goto exit_transfer;
+    }
+
+    ret = insert_options(ctx.tx_buf, ctx.BUF_SIZE - ARGS_HDR_LEN, ctx.blk_size, ctx.file_size, ctx.win_size);
+    if (ret < 0)
+    {
+        LOG_ERROR("tx_buf small for oack string");
+        goto cleanup_ctx;
+    }
+    
+    if (ret > 0)
+    {
+        set_opcode(ctx.tx_buf, CODE_OACK);
+        ctx.tx_len = ARGS_HDR_LEN + (size_t) ret;
+        ctx.b_sent = send(ctx.conn_sock, ctx.tx_buf, ctx.tx_len, 0);
+        if (ctx.b_sent < 0)
+        {
+            LOG_ERROR("send OACK str len %lu: %s ", ctx.tx_len, strerror(errno));
+            goto cleanup_ctx;
+        }
+    }
+
+    if (ctx.action == CODE_RRQ)
+    {
+        ;
+    }
+    else if (ctx.action == CODE_WRQ)
+    {
+        ;
+    }
+
+cleanup_ctx:
+    free(ctx.tx_buf);
+    free(ctx.rx_buf);
+    close(ctx.file_desc);
+exit_transfer:
+    free(req);
+    close(ctx.conn_sock);
+    return NULL;
+}
+
+int main()
+{
+    int ret = 0;
+    int server_sock = 0;
+    socklen_t s_len = SOCKADDR_SIZE;
+    pthread_t client_th = 0;
+    tftp_request *req = NULL;
+
+    ret = redirect_output();
+    if (ret < 0)
+        return EXIT_FAILURE;
+
+    ret = register_sighandler(handle_signal);
+    if (ret < 0)
+        return EXIT_FAILURE;
+
+    server_sock = initiate_server();
+    if (server_sock < 0)
+        return EXIT_FAILURE;
+
+    LOG_INFO("Server is running");
+
+    while (g_running)
+    {
+        if (req == NULL)
+        {
+            req = (tftp_request *)malloc(sizeof(tftp_request));
+            if (req == NULL)
+            {
+                LOG_ERROR("malloc: %s", strerror(errno));
+                break;
+            }
+        }
+
+        memset(req, 0, sizeof(tftp_request));
+
+        req->data_len = recvfrom(server_sock, req->data, REQUEST_SIZE, 0, (s_addr *)&(req->client_addr), &s_len);
+        if (req->data_len <= 0)
+        {
+            if (g_running)
+                LOG_ERROR("recvfrom: %s", strerror(errno));
+
+            continue;
+        }
+
+        ret = pthread_create(&client_th, NULL, handle_tftp_request, req);
+        if (ret != 0)
+        {
+            LOG_ERROR("pthread_create: %d", ret);
+            continue;
+        }
+        pthread_detach(client_th);
+        req = NULL;
+    }
+
+    close(server_sock);
+    LOG_INFO("Server shutdown");
+
+    return EXIT_SUCCESS;
+}
+
+/**
+ *  - Check for MSG_TRUNC during incoming request
+ *  - Remove MAX_FILE_SIZE limit as we have blk num roll over
+ *  - Use threadpools
+ *
+ * // Connect to client
+ * // Parse filename
+ * // Validate options
+ * // Construct OACK string
+ * // Finish handshake
+ */
