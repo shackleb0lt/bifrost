@@ -254,6 +254,62 @@ int init_client_request(tftp_context *ctx)
 }
 
 /**
+ *
+ */
+int parse_oack_string(tftp_context *ctx)
+{
+    int ret = 0;
+    size_t *blk_size = NULL;
+    size_t *win_size = NULL;
+    off_t *file_size = NULL;
+
+    if (ctx->blk_size != DEF_BLK_SIZE)
+        blk_size = &(ctx->blk_size);
+
+    if (ctx->win_size != DEF_WIN_SIZE)
+        win_size = &(ctx->win_size);
+
+    if (ctx->file_size == 0 && ctx->action == CODE_RRQ)
+        file_size = &(ctx->file_size);
+
+    ret = extract_options(ctx->rx_buf + ARGS_HDR_LEN, ctx->rx_len - ARGS_HDR_LEN, blk_size, file_size, win_size);
+    if (ret)
+    {
+        // Send bad opt packet;
+        return -1;
+    }
+
+    if (ctx->BUF_SIZE != ctx->blk_size + DATA_HDR_LEN)
+    {
+        ctx->BUF_SIZE = ctx->blk_size + DATA_HDR_LEN;
+
+        ctx->tx_buf = realloc(ctx->tx_buf, ctx->BUF_SIZE);
+        if (ctx->tx_buf == NULL)
+        {
+            fprintf(stderr, "realloc: %s\n", strerror(errno));
+            return -1;
+        }
+
+        ctx->rx_buf = realloc(ctx->rx_buf, ctx->BUF_SIZE);
+        if (ctx->rx_buf == NULL)
+        {
+            fprintf(stderr, "realloc: %s\n", strerror(errno));
+            return -1;
+        }
+
+        memset(ctx->tx_buf, 0, ctx->BUF_SIZE);
+        memset(ctx->rx_buf, 0, ctx->BUF_SIZE);
+    }
+
+    else if (ctx->action == CODE_RRQ)
+        tftp_recv_file(ctx, true);
+    else if (ctx->action == CODE_WRQ)
+        tftp_send_file(ctx);
+
+    return 0;
+}
+
+/**
  * Function that sets up the socket for future communication
  * Also performs some security check to be sure packet
  * originated from intended source.
@@ -339,85 +395,41 @@ recv_again:
     }
     else if (code == CODE_ACK && block_num == 0 && ctx->action == CODE_WRQ)
     {
-        ret = connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->a_len);
-        if (ret != 0)
-        {
-            fprintf(stderr, "connect: %s\n", strerror(errno));
-            return -1;
-        }
-        return 0;
+        goto connect_socket;
     }
     else if (code == CODE_DATA && block_num == 1 && ctx->action == CODE_RRQ)
     {
-        ret = connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->a_len);
-        if (ret != 0)
-        {
-            fprintf(stderr, "connect: %s\n", strerror(errno));
-            return -1;
-        }
-        return 0;
+        goto connect_socket;
+    }
+    else if (code == CODE_OACK)
+    {
+        goto connect_socket;
     }
 
     LOG_ERROR("Recieved unexpected opcode %d block num %d", code, block_num);
     goto recv_again;
 
-    return 0;
-}
-
-/**
- *
-
-int parse_first_packet(tftp_context *ctx)
-{
-    int ret = 0;
-    size_t *blk_size = NULL;
-    size_t *win_size = NULL;
-    off_t *file_size = NULL;
-
-    if (ctx->prev_code != CODE_OACK)
-        return 0;
-
-    if (ctx->blk_size != DEF_BLK_SIZE)
-        blk_size = &(ctx->blk_size);
-
-    if (ctx->win_size != DEF_WIN_SIZE)
-        win_size = &(ctx->win_size);
-
-    if (ctx->file_size == 0 && ctx->action == CODE_RRQ)
-        file_size = &(ctx->file_size);
-
-    ctx->rx_len = (size_t)bytes_recv - ARGS_HDR_LEN;
-    ret = extract_options(ctx->rx_buf + ARGS_HDR_LEN, ctx->rx_len, blk_size, file_size, win_size);
-    if (ret)
+connect_socket:
+    ret = connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->a_len);
+    if (ret != 0)
     {
-        // Send bad opt packet;
+        fprintf(stderr, "connect: %s\n", strerror(errno));
         return -1;
     }
 
-    if (ctx->BUF_SIZE != ctx->blk_size + DATA_HDR_LEN)
+    if (code == CODE_OACK)
     {
-        ctx->BUF_SIZE = ctx->blk_size + DATA_HDR_LEN;
-
-        ctx->tx_buf = realloc(ctx->tx_buf, ctx->BUF_SIZE);
-        if (ctx->tx_buf == NULL)
-        {
-            fprintf(stderr, "realloc: %s\n", strerror(errno));
+        ret = parse_oack_string(ctx);
+        if (ret != 0)
             return -1;
-        }
-
-        ctx->rx_buf = realloc(ctx->rx_buf, ctx->BUF_SIZE);
-        if (ctx->rx_buf == NULL)
-        {
-            fprintf(stderr, "realloc: %s\n", strerror(errno));
-            return -1;
-        }
-
-        memset(ctx->tx_buf, 0, ctx->BUF_SIZE);
-        memset(ctx->rx_buf, 0, ctx->BUF_SIZE);
     }
+    else if (ctx->action == CODE_RRQ)
+        tftp_recv_file(ctx, false);
+    else if (ctx->action == CODE_WRQ)
+        tftp_send_file(ctx);
+
     return 0;
 }
- */
 
 int main(int argc, char *argv[])
 {
@@ -584,11 +596,6 @@ int main(int argc, char *argv[])
         free_tftp_context(ctx);
         return EXIT_FAILURE;
     }
-
-    if (ctx->action == CODE_RRQ)
-        tftp_recv_file(ctx, false);
-    else if (ctx->action == CODE_WRQ)
-        tftp_send_file(ctx);
 
     fflush(stderr);
     fflush(stdout);

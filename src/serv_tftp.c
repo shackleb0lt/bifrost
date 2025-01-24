@@ -204,7 +204,7 @@ size_t parse_filename(tftp_context *ctx, char *filename)
             send_error_packet(ctx->conn_sock, EUNDEF);
             return 0;
         }
-        printf("Requesting %s\n", fullname);
+
         fflush(stdout);
         ctx->file_size = 0;
         ctx->file_desc = open(fullname, O_WRONLY | O_TRUNC | O_CREAT, 0644);
@@ -394,10 +394,4 @@ int main()
  *  - Check for MSG_TRUNC during incoming request
  *  - Remove MAX_FILE_SIZE limit as we have blk num roll over
  *  - Use threadpools
- *
- * // Connect to client
- * // Parse filename
- * // Validate options
- * // Construct OACK string
- * // Finish handshake
  */
