@@ -184,6 +184,6 @@ int init_tftp_context(tftp_context * ctx, TFTP_OPCODE action, size_t b_size, siz
 void free_tftp_context(tftp_context * ctx);
 
 void tftp_send_file(tftp_context *ctx);
-void tftp_recv_file(tftp_context *ctx);
+void tftp_recv_file(tftp_context *ctx, bool is_server);
 
 #endif

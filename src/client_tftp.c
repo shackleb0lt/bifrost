@@ -585,17 +585,10 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    // ret = parse_first_packet(ctx);
-    // if (ret)
-    // {
-    //     free_tftp_context(ctx);
-    //     return EXIT_FAILURE;
-    // }
-
-    if (ctx->action == CODE_WRQ)
+    if (ctx->action == CODE_RRQ)
+        tftp_recv_file(ctx, false);
+    else if (ctx->action == CODE_WRQ)
         tftp_send_file(ctx);
-    else if (ctx->action == CODE_RRQ)
-        tftp_recv_file(ctx);
 
     fflush(stderr);
     fflush(stdout);

@@ -74,7 +74,7 @@ int initiate_server()
     memset(&saddr, 0, sa_len);
     saddr.sin_family = AF_INET;
     saddr.sin_port = htons(TFTP_SERVER_PORT);
-    saddr.sin_addr.s_addr = INADDR_ANY;
+    saddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock_fd < 0)
@@ -95,6 +95,7 @@ int initiate_server()
 
 int connect_to_client(tftp_context *ctx)
 {
+    s4_addr temp_addr;
     ctx->conn_sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (ctx->conn_sock < 0)
     {
@@ -102,9 +103,20 @@ int connect_to_client(tftp_context *ctx)
         return -1;
     }
 
+    memset(&temp_addr, 0, SOCKADDR_SIZE);
+    temp_addr.sin_family = AF_INET;
+    temp_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    temp_addr.sin_port = 0;
+
+    if (bind(ctx->conn_sock, (s_addr *)&temp_addr, SOCKADDR_SIZE) < 0) {
+        LOG_ERROR("%s bind: %s", __func__, strerror(errno));
+        close(ctx->conn_sock);
+        return -1;
+    }
+
     if (connect(ctx->conn_sock, (s_addr *)&(ctx->addr), SOCKADDR_SIZE) < 0)
     {
-        LOG_ERROR("client connect: %s", strerror(errno));
+        LOG_ERROR("%s connect: %s", __func__, strerror(errno));
         close(ctx->conn_sock);
         return -1;
     }
@@ -126,11 +138,28 @@ static void send_error_packet(int sock, TFTP_ERRCODE err_code)
 
 size_t parse_filename(tftp_context *ctx, char *filename)
 {
+    char *ptr = NULL;
     struct stat st = {0};
     char temp[PATH_MAX] = {0};
     char fullname[PATH_MAX] = {0};
+    char basename[PATH_LEN] = {0};
 
     snprintf(temp, PATH_MAX, "%s%s", TFTP_SERVER_PATH, filename);
+    ptr = strrchr(temp, '/') + 1;
+    if ((*ptr) == '\0')
+    {
+        LOG_ERROR("Filename not provided %s", temp);
+        snprintf(ctx->err_str, DEF_BLK_SIZE, "Filename not provided");
+        send_error_packet(ctx->conn_sock, EUNDEF);
+        return 0;
+    }
+
+    if (ctx->action == CODE_WRQ)
+    {
+        strncpy(basename, ptr, PATH_LEN - 1);
+        (*ptr) = '\0';
+    }
+
     if (realpath(temp, fullname) == NULL)
     {
         LOG_ERROR("Invalid filename %s: %s", temp, strerror(errno));
@@ -152,13 +181,33 @@ size_t parse_filename(tftp_context *ctx, char *filename)
             LOG_ERROR("stat %s: %s", fullname, strerror(errno));
             return 0;
         }
+
+        if (S_ISREG(st.st_mode) == false)
+        {
+            LOG_ERROR("Path is a directory %s", fullname);
+            snprintf(ctx->err_str, DEF_BLK_SIZE, "Path is a directory");
+            send_error_packet(ctx->conn_sock, EUNDEF);
+            return 0;
+        }
+
         ctx->file_size = st.st_size;
-        ctx->file_desc = open(filename, O_RDONLY);
+        ctx->file_desc = open(fullname, O_RDONLY);
     }
     else if (ctx->action == CODE_WRQ)
     {
+        strcat(fullname, "/");
+        strcat(fullname, basename);
+        if (stat(fullname, &st) == 0 && S_ISDIR(st.st_mode))
+        {
+            LOG_ERROR("Path is prexisting directory %s", fullname);
+            snprintf(ctx->err_str, DEF_BLK_SIZE, "Path is prexisting directory");
+            send_error_packet(ctx->conn_sock, EUNDEF);
+            return 0;
+        }
+        printf("Requesting %s\n", fullname);
+        fflush(stdout);
         ctx->file_size = 0;
-        ctx->file_desc = open(filename, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+        ctx->file_desc = open(fullname, O_WRONLY | O_TRUNC | O_CREAT, 0644);
     }
 
     if (ctx->file_desc < 0)
@@ -182,14 +231,14 @@ int validate_parameters(tftp_context *ctx, char *buf, size_t len)
     if (curr_len == 0)
         return -1;
     else if (curr_len == len)
-        return 0;
+        goto allocate_buffer; // Send a missing mode error packet later
     
     buf += curr_len;
     len -= curr_len;
 
     curr_len = strlen(buf) + 1;
     if (curr_len == len)
-        return 0;
+        goto allocate_buffer;
 
     buf += curr_len;
     len -= curr_len;
@@ -204,7 +253,8 @@ int validate_parameters(tftp_context *ctx, char *buf, size_t len)
         ctx->file_size = -1;
     else if (ctx->action == CODE_WRQ)
         ctx->file_size = temp_size;
-    
+
+allocate_buffer:
     ctx->BUF_SIZE = ctx->blk_size + DATA_HDR_LEN;
     ctx->tx_buf = (char *) malloc(ctx->BUF_SIZE);
     if (ctx->tx_buf == NULL)
@@ -264,35 +314,12 @@ void *handle_tftp_request(void *arg)
         goto exit_transfer;
     }
 
-    ret = insert_options(ctx.tx_buf, ctx.BUF_SIZE - ARGS_HDR_LEN, ctx.blk_size, ctx.file_size, ctx.win_size);
-    if (ret < 0)
-    {
-        LOG_ERROR("tx_buf small for oack string");
-        goto cleanup_ctx;
-    }
-    
-    if (ret > 0)
-    {
-        set_opcode(ctx.tx_buf, CODE_OACK);
-        ctx.tx_len = ARGS_HDR_LEN + (size_t) ret;
-        ret = (int) send(ctx.conn_sock, ctx.tx_buf, ctx.tx_len, 0);
-        if (ret < 0)
-        {
-            LOG_ERROR("send OACK str len %lu: %s ", ctx.tx_len, strerror(errno));
-            goto cleanup_ctx;
-        }
-    }
-
     if (ctx.action == CODE_RRQ)
-    {
         tftp_send_file(&ctx);
-    }
     else if (ctx.action == CODE_WRQ)
-    {
-        tftp_recv_file(&ctx);
-    }
+        tftp_recv_file(&ctx, true);
 
-cleanup_ctx:
+// cleanup_ctx:
     free(ctx.tx_buf);
     free(ctx.rx_buf);
     close(ctx.file_desc);

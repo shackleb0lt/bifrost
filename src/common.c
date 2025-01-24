@@ -375,8 +375,12 @@ void handle_error_packet(char *rx_buf, ssize_t b_recv)
         rx_buf = (char *)tftp_err_to_str(err_code);
     else
         rx_buf[b_recv] = '\0';
+#ifdef DEBUG
+    LOG_ERROR("server error (%d): %s", err_code, rx_buf);
+#else
+    LOG_ERROR("server error : %s", rx_buf);
 
-    LOG_ERROR("server error: %s\n", rx_buf);
+#endif
 }
 
 ssize_t s_read(int fd, void *buf, size_t count)
@@ -613,7 +617,7 @@ recv_again:
     goto recv_again;
 }
 
-void tftp_recv_file(tftp_context *ctx)
+void tftp_recv_file(tftp_context *ctx, bool is_server)
 {
     int ret = 0;
     bool is_done = false;
@@ -630,6 +634,15 @@ void tftp_recv_file(tftp_context *ctx)
 
     ctx->e_block_num = 1;
     ctx->r_block_num = 1;
+
+    ctx->tx_len = DATA_HDR_LEN;
+    if (is_server)
+    {
+        ctx->r_block_num = 0;
+        set_opcode(ctx->tx_buf, CODE_ACK);
+        set_blocknum(ctx->tx_buf, ctx->r_block_num);
+        goto send_again;
+    }
 
 write_next_block:
     ctx->e_block_num++;
@@ -650,8 +663,6 @@ write_next_block:
 
     set_opcode(ctx->tx_buf, CODE_ACK);
     set_blocknum(ctx->tx_buf, ctx->r_block_num);
-
-    ctx->tx_len = DATA_HDR_LEN;
 
     retries = TFTP_NUM_RETRIES;
     wait_time = TFTP_TIMEOUT_MS;
