@@ -514,7 +514,6 @@ void tftp_send_file(tftp_context *ctx)
     bool is_done = false;
 
     ssize_t bytes_read = 0;
-    ssize_t bytes_recv = 0;
     ssize_t bytes_sent = 0;
     struct pollfd pfd = {0};
 
@@ -523,10 +522,14 @@ void tftp_send_file(tftp_context *ctx)
 
     TFTP_OPCODE code = CODE_UNDEF;
 
-    ctx->e_block_num = 1;
+    ctx->e_block_num = 0;
     ctx->r_block_num = 0;
 
 read_next_block:
+    ctx->e_block_num++;
+    if (ctx->e_block_num > MAX_BLK_NUM)
+        ctx->e_block_num = 0;
+    
     bytes_read = s_read(ctx->file_desc, ctx->tx_buf + DATA_HDR_LEN, ctx->blk_size);
     if (bytes_read < 0)
     {
@@ -578,15 +581,16 @@ recv_again:
         return;
     }
 
-    bytes_recv = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
-    if (bytes_recv < 0)
+    ctx->rx_len = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
+    if (ctx->rx_len < 0)
     {
         LOG_ERROR("recv: %s", strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
     }
-    else if (bytes_recv < DATA_HDR_LEN)
+    else if (ctx->rx_len < DATA_HDR_LEN)
     {
+        LOG_ERROR("Received corrupted packet with length %ld", ctx->rx_len);
         goto recv_again;
     }
 
@@ -594,7 +598,7 @@ recv_again:
     ctx->r_block_num = get_blocknum(ctx->rx_buf);
     if (code == CODE_ERROR)
     {
-        handle_error_packet(ctx->rx_buf, bytes_recv);
+        handle_error_packet(ctx->rx_buf, ctx->rx_len);
         return;
     }
     else if (code == CODE_ACK && ctx->r_block_num == ctx->e_block_num)
@@ -602,12 +606,10 @@ recv_again:
         ctx->curr_size += (off_t)bytes_read;
         if (is_done)
             return;
-        ctx->e_block_num++;
-        if (ctx->e_block_num > MAX_BLK_NUM)
-            ctx->e_block_num = 0;
         goto read_next_block;
     }
 
+    LOG_ERROR("Received unexpected packet %d %lu", code, ctx->r_block_num);
     goto recv_again;
 }
 
@@ -617,7 +619,7 @@ void tftp_recv_file(tftp_context *ctx)
     bool is_done = false;
 
     ssize_t bytes_written = 0;
-    ssize_t bytes_recv = 0;
+    size_t  bytes_recv = 0;
     ssize_t bytes_sent = 0;
     struct pollfd pfd = {0};
 
@@ -627,33 +629,24 @@ void tftp_recv_file(tftp_context *ctx)
     int wait_time = TFTP_TIMEOUT_MS;
 
     ctx->e_block_num = 1;
-    ctx->r_block_num = 0;
-
-// In case of client on RRQ
-// We are sending the request
-// Or we are resending ACK0
-
-// In case of server on WRQ
-// We are resending ACK0
-// Or we are resending OACK
-
-    // goto send_again;
-    // retries++;
-    goto recv_again;
+    ctx->r_block_num = 1;
 
 write_next_block:
-    ctx->rx_len = (size_t)bytes_recv - DATA_HDR_LEN;
+    ctx->e_block_num++;
+    if (ctx->e_block_num > MAX_BLK_NUM)
+        ctx->e_block_num = 0;
 
-    if (ctx->rx_len < ctx->blk_size)
+    bytes_recv = (size_t) ctx->rx_len - DATA_HDR_LEN;
+    if (bytes_recv < ctx->blk_size)
         is_done = true;
 
-    bytes_written = s_write(ctx->file_desc, ctx->rx_buf + DATA_HDR_LEN, ctx->rx_len);
-    if ((size_t)bytes_written != ctx->rx_len)
+    bytes_written = s_write(ctx->file_desc, ctx->rx_buf + DATA_HDR_LEN, bytes_recv);
+    if ((size_t)bytes_written != bytes_recv)
     {
         send_error_packet(ctx, ENOSPACE);
         return;
     }
-    ctx->curr_size += bytes_written;
+    ctx->curr_size += (off_t) bytes_written;
 
     set_opcode(ctx->tx_buf, CODE_ACK);
     set_blocknum(ctx->tx_buf, ctx->r_block_num);
@@ -700,15 +693,16 @@ recv_again:
         return;
     }
 
-    bytes_recv = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
-    if (bytes_recv < 0)
+    ctx->rx_len = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
+    if (ctx->rx_len < 0)
     {
         LOG_ERROR("recv: %s", strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
     }
-    else if (bytes_recv < DATA_HDR_LEN)
+    else if (ctx->rx_len < DATA_HDR_LEN)
     {
+        LOG_ERROR("Received corrupted packet with length %ld", ctx->rx_len);
         goto recv_again;
     }
 
@@ -716,16 +710,14 @@ recv_again:
     ctx->r_block_num = get_blocknum(ctx->rx_buf);
     if (code == CODE_ERROR)
     {
-        handle_error_packet(ctx->rx_buf, bytes_recv);
+        handle_error_packet(ctx->rx_buf, ctx->rx_len);
         return;
     }
     else if (code == CODE_DATA && ctx->r_block_num == ctx->e_block_num)
     {
-        ctx->e_block_num++;
-        if (ctx->e_block_num > MAX_BLK_NUM)
-            ctx->e_block_num = 0;
         goto write_next_block;
     }
 
+    LOG_ERROR("Received unexpected packet %d %lu", code, ctx->r_block_num);
     goto recv_again;
 }

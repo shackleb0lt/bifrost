@@ -227,6 +227,7 @@ int init_client_request(tftp_context *ctx)
     curr_ptr += option_len + 1;
     curr_len += option_len + 1;
 
+    ctx->file_size = -1;
     ret = insert_options(curr_ptr, DEF_BLK_SIZE - curr_len, ctx->blk_size, ctx->file_size, ctx->win_size);
     if (ret == -1)
     {
@@ -235,6 +236,7 @@ int init_client_request(tftp_context *ctx)
     }
 
     ctx->tx_len = curr_len + (size_t)ret;
+    ctx->is_oack = (ret > 0);
 
 #if 0
     size_t i = 0;
@@ -248,7 +250,6 @@ int init_client_request(tftp_context *ctx)
     }
     printf("\n");
 #endif
-
     return 0;
 }
 
@@ -264,7 +265,9 @@ int tftp_connect(tftp_context *ctx)
     int ret = 0;
     int retries = TFTP_NUM_RETRIES;
     int wait_time = TFTP_TIMEOUT_MS;
+    TFTP_OPCODE code = CODE_UNDEF;
 
+    ssize_t bytes_sent = 0;
     uint16_t block_num = 0;
     struct pollfd pfd = {0};
     struct in_addr saved_addr = {0};
@@ -278,8 +281,8 @@ int tftp_connect(tftp_context *ctx)
     }
 
 send_again:
-    ctx->b_sent = sendto(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0, (s_addr *)&(ctx->addr), ctx->a_len);
-    if (ctx->b_sent != (ssize_t)ctx->tx_len)
+    bytes_sent = sendto(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0, (s_addr *)&(ctx->addr), ctx->a_len);
+    if (bytes_sent != (ssize_t)ctx->tx_len)
     {
         fprintf(stderr, "sendto: %s\n", strerror(errno));
         return -1;
@@ -310,56 +313,60 @@ recv_again:
         return -1;
     }
 
-    ctx->b_recv = recvfrom(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0, (s_addr *)&ctx->addr, &(ctx->a_len));
-    if (ctx->b_recv <= 0)
+    ctx->rx_len = recvfrom(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0, (s_addr *)&ctx->addr, &(ctx->a_len));
+    if (ctx->rx_len <= 0)
     {
         fprintf(stderr, "recvfrom: %s\n", strerror(errno));
         return -1;
     }
-    else if (ctx->b_recv < DATA_HDR_LEN)
+    else if (ctx->rx_len < DATA_HDR_LEN)
     {
-        LOG_ERROR("Received corrupted packet with length %ld", ctx->b_recv);
+        LOG_ERROR("Received corrupted packet with length %ld", ctx->rx_len);
         goto recv_again;
     }
-
-    if (saved_addr.s_addr != ctx->addr.sin_addr.s_addr)
+    else if (saved_addr.s_addr != ctx->addr.sin_addr.s_addr)
     {
         fprintf(stderr, "Received response from unknown IP address\n");
         return -1;
     }
 
-    ctx->prev_code = get_opcode(ctx->rx_buf);
-    if (ctx->prev_code == CODE_OACK)
-        goto connect_sock;
-    
+    code = get_opcode(ctx->rx_buf);
     block_num = get_blocknum(ctx->rx_buf);
-    if(ctx->prev_code == CODE_ERROR)
+    if(code == CODE_ERROR)
     {
-        handle_error_packet(ctx->rx_buf, ctx->b_recv);
+        handle_error_packet(ctx->rx_buf, ctx->rx_len);
         return -1;
     }
-    if (ctx->action == CODE_RRQ && ctx->prev_code == CODE_DATA && block_num == 1)
-        goto connect_sock;
-    if (ctx->action == CODE_WRQ && ctx->prev_code == CODE_ACK && block_num == 0)
-        goto connect_sock;
+    else if (code == CODE_ACK && block_num == 0 && ctx->action == CODE_WRQ)
+    {
+        ret = connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->a_len);
+        if (ret != 0)
+        {
+            fprintf(stderr, "connect: %s\n", strerror(errno));
+            return -1;
+        }
+        return 0;
+    }
+    else if (code == CODE_DATA && block_num == 1 && ctx->action == CODE_RRQ)
+    {
+        ret = connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->a_len);
+        if (ret != 0)
+        {
+            fprintf(stderr, "connect: %s\n", strerror(errno));
+            return -1;
+        }
+        return 0;
+    }
 
-    LOG_ERROR("Recieved unexpected opcode %d block num %d", ctx->prev_code, block_num);
+    LOG_ERROR("Recieved unexpected opcode %d block num %d", code, block_num);
     goto recv_again;
-
-connect_sock:
-    ret = connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->a_len);
-    if (ret != 0)
-    {
-        fprintf(stderr, "connect: %s\n", strerror(errno));
-        return -1;
-    }
 
     return 0;
 }
 
 /**
  *
- */
+
 int parse_first_packet(tftp_context *ctx)
 {
     int ret = 0;
@@ -379,7 +386,7 @@ int parse_first_packet(tftp_context *ctx)
     if (ctx->file_size == 0 && ctx->action == CODE_RRQ)
         file_size = &(ctx->file_size);
 
-    ctx->rx_len = (size_t)ctx->b_recv - ARGS_HDR_LEN;
+    ctx->rx_len = (size_t)bytes_recv - ARGS_HDR_LEN;
     ret = extract_options(ctx->rx_buf + ARGS_HDR_LEN, ctx->rx_len, blk_size, file_size, win_size);
     if (ret)
     {
@@ -410,6 +417,7 @@ int parse_first_packet(tftp_context *ctx)
     }
     return 0;
 }
+ */
 
 int main(int argc, char *argv[])
 {
@@ -426,7 +434,7 @@ int main(int argc, char *argv[])
     if (ret != 0)
         return EXIT_FAILURE;
 
-    while ((ret = getopt(argc, argv, "l:r:b:w:gph")) != -1)
+    while ((ret = getopt(argc, argv, "l:r:b:w:gpqh")) != -1)
     {
         switch (ret)
         {
@@ -577,16 +585,16 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    ret = parse_first_packet(ctx);
-    if (ret)
-    {
-        free_tftp_context(ctx);
-        return EXIT_FAILURE;
-    }
+    // ret = parse_first_packet(ctx);
+    // if (ret)
+    // {
+    //     free_tftp_context(ctx);
+    //     return EXIT_FAILURE;
+    // }
 
-    if(ctx->action == CODE_WRQ)
+    if (ctx->action == CODE_WRQ)
         tftp_send_file(ctx);
-    else if(ctx->action == CODE_RRQ)
+    else if (ctx->action == CODE_RRQ)
         tftp_recv_file(ctx);
 
     fflush(stderr);

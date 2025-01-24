@@ -139,8 +139,8 @@ typedef struct
     char *tx_buf;
     char *rx_buf;
 
-    size_t tx_len;
-    size_t rx_len; 
+    size_t  tx_len;
+    ssize_t rx_len; 
 
     s4_addr addr;
     socklen_t a_len;
@@ -159,6 +159,8 @@ typedef struct
 
     TFTP_MODE mode;
     TFTP_OPCODE action;
+
+    bool is_oack;
 
     TFTP_ERRCODE err_code;
     char err_str[DEF_BLK_SIZE];
