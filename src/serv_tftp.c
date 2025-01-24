@@ -275,8 +275,8 @@ void *handle_tftp_request(void *arg)
     {
         set_opcode(ctx.tx_buf, CODE_OACK);
         ctx.tx_len = ARGS_HDR_LEN + (size_t) ret;
-        ctx.b_sent = send(ctx.conn_sock, ctx.tx_buf, ctx.tx_len, 0);
-        if (ctx.b_sent < 0)
+        ret = (int) send(ctx.conn_sock, ctx.tx_buf, ctx.tx_len, 0);
+        if (ret < 0)
         {
             LOG_ERROR("send OACK str len %lu: %s ", ctx.tx_len, strerror(errno));
             goto cleanup_ctx;
@@ -285,11 +285,11 @@ void *handle_tftp_request(void *arg)
 
     if (ctx.action == CODE_RRQ)
     {
-        ;
+        tftp_send_file(&ctx);
     }
     else if (ctx.action == CODE_WRQ)
     {
-        ;
+        tftp_recv_file(&ctx);
     }
 
 cleanup_ctx:

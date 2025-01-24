@@ -42,7 +42,7 @@ const char *err_strs[] =
  */
 const char *tftp_err_to_str(TFTP_ERRCODE err_code)
 {
-    if(err_code > EBADOPT)
+    if (err_code > EBADOPT)
         err_code = EUNDEF;
     return err_strs[err_code];
 }
@@ -194,8 +194,8 @@ bool is_valid_filesize(const char *size_str, off_t *file_size)
 /**
  * Scans the string received in OACK by client or in Request by server
  * If an option with name opt is present return it's value as str
- * 
- * Returns NULL if such an option was not found  
+ *
+ * Returns NULL if such an option was not found
  */
 char *get_option_val(const char *opt, char oack_str[], size_t len)
 {
@@ -226,7 +226,7 @@ char *get_option_val(const char *opt, char oack_str[], size_t len)
 /**
  * Add TFTP options to a buffer of size buf_len
  * Use passed parameters for filling the buffer
- * 
+ *
  * @return 0 on success, -1 if buffer is insufficient
  */
 int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size, size_t win_size)
@@ -238,11 +238,11 @@ int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size,
 
     if (blk_size != DEF_BLK_SIZE)
     {
-        op_len = (size_t) snprintf(option, 32, "%lu", blk_size);
-        curr_len += BLKSIZE_OPLEN + op_len + 2; 
+        op_len = (size_t)snprintf(option, 32, "%lu", blk_size);
+        curr_len += BLKSIZE_OPLEN + op_len + 2;
         if (curr_len > buf_len)
             return -1;
-        
+
         strcpy(curr_ptr, BLKSIZE_OP);
         curr_ptr += BLKSIZE_OPLEN + 1;
         strcpy(curr_ptr, option);
@@ -251,11 +251,11 @@ int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size,
 
     if (file_size != -1)
     {
-        op_len = (size_t)  snprintf(option, 32, "%lu", file_size);
-        curr_len += TSIZE_OPLEN + op_len + 2; 
+        op_len = (size_t)snprintf(option, 32, "%lu", file_size);
+        curr_len += TSIZE_OPLEN + op_len + 2;
         if (curr_len > buf_len)
             return -1;
-        
+
         strcpy(curr_ptr, TSIZE_OP);
         curr_ptr += TSIZE_OPLEN + 1;
         strcpy(curr_ptr, option);
@@ -264,18 +264,18 @@ int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size,
 
     if (win_size != DEF_WIN_SIZE)
     {
-        op_len = (size_t)  snprintf(option, 32, "%lu", win_size);
-        curr_len += WINSIZE_OPLEN + op_len + 2; 
+        op_len = (size_t)snprintf(option, 32, "%lu", win_size);
+        curr_len += WINSIZE_OPLEN + op_len + 2;
         if (curr_len > buf_len)
             return -1;
-        
+
         strcpy(curr_ptr, WINSIZE_OP);
         curr_ptr += WINSIZE_OPLEN + 1;
         strcpy(curr_ptr, option);
         curr_ptr += op_len + 1;
     }
 
-    return (int) curr_len;
+    return (int)curr_len;
 }
 
 /**
@@ -294,7 +294,7 @@ int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_si
         {
             *blk_size = DEF_BLK_SIZE;
         }
-        else if(is_valid_blocksize(val, blk_size) == false)
+        else if (is_valid_blocksize(val, blk_size) == false)
         {
             LOG_ERROR("Received invalid block size %s", val);
             return -1;
@@ -304,7 +304,7 @@ int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_si
     if (file_size)
     {
         val = get_option_val(TSIZE_OP, buf, buf_len);
-        if(val && is_valid_filesize(val, file_size) == false)
+        if (val && is_valid_filesize(val, file_size) == false)
         {
             LOG_ERROR("Received invalid file size %s", val);
             return -1;
@@ -318,7 +318,7 @@ int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_si
         {
             *win_size = DEF_WIN_SIZE;
         }
-        else if(is_valid_windowsize(val, win_size) == false)
+        else if (is_valid_windowsize(val, win_size) == false)
         {
             LOG_ERROR("Received invalid window size %s", val);
             return -1;
@@ -372,7 +372,7 @@ void handle_error_packet(char *rx_buf, ssize_t b_recv)
     b_recv -= DATA_HDR_LEN;
 
     if (b_recv == 0)
-        rx_buf = (char *) tftp_err_to_str(err_code);
+        rx_buf = (char *)tftp_err_to_str(err_code);
     else
         rx_buf[b_recv] = '\0';
 
@@ -401,7 +401,7 @@ ssize_t s_read(int fd, void *buf, size_t count)
             break;
 
         ptr += bytes_read;
-        count -= (size_t) bytes_read;
+        count -= (size_t)bytes_read;
         total_read += bytes_read;
     }
 
@@ -430,7 +430,7 @@ ssize_t s_write(int fd, const void *buf, size_t count)
             break;
 
         ptr += written;
-        count -= (size_t) written;
+        count -= (size_t)written;
         total_written += written;
     }
 
@@ -449,14 +449,14 @@ int init_tftp_context(tftp_context *ctx, TFTP_OPCODE action, size_t blk_size, si
     ctx->blk_size = blk_size;
     ctx->win_size = w_size;
 
-    ctx->tx_buf = (char *) malloc(ctx->BUF_SIZE);
+    ctx->tx_buf = (char *)malloc(ctx->BUF_SIZE);
     if (ctx->tx_buf == NULL)
     {
         LOG_ERROR("%s: malloc tx_buf: %s", __func__, strerror(errno));
         return -1;
     }
 
-    ctx->rx_buf = (char *) malloc(ctx->BUF_SIZE);
+    ctx->rx_buf = (char *)malloc(ctx->BUF_SIZE);
     if (ctx->rx_buf == NULL)
     {
         LOG_ERROR("%s: malloc rx_buf: %s", __func__, strerror(errno));
@@ -504,7 +504,7 @@ static void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code)
     set_blocknum(ctx->tx_buf, err_code);
 
     ctx->tx_len = DATA_HDR_LEN;
-    ctx->tx_len += (size_t) snprintf(ctx->tx_buf + DATA_HDR_LEN, ctx->blk_size,"%s", tftp_err_to_str(err_code));
+    ctx->tx_len += (size_t)snprintf(ctx->tx_buf + DATA_HDR_LEN, ctx->blk_size, "%s", tftp_err_to_str(err_code));
     send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
 }
 
@@ -514,6 +514,8 @@ void tftp_send_file(tftp_context *ctx)
     bool is_done = false;
 
     ssize_t bytes_read = 0;
+    ssize_t bytes_recv = 0;
+    ssize_t bytes_sent = 0;
     struct pollfd pfd = {0};
 
     int retries = TFTP_NUM_RETRIES;
@@ -535,7 +537,7 @@ read_next_block:
     set_opcode(ctx->tx_buf, CODE_DATA);
     set_blocknum(ctx->tx_buf, ctx->e_block_num);
 
-    ctx->tx_len = (size_t) bytes_read + DATA_HDR_LEN;
+    ctx->tx_len = (size_t)bytes_read + DATA_HDR_LEN;
     if (ctx->tx_len < ctx->BUF_SIZE)
         is_done = true;
 
@@ -543,8 +545,8 @@ read_next_block:
     wait_time = TFTP_TIMEOUT_MS;
 
 send_again:
-    ctx->b_sent = send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
-    if (ctx->b_sent < 0)
+    bytes_sent = send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
+    if (bytes_sent < 0)
     {
         LOG_ERROR("send: %s", strerror(errno));
         return;
@@ -576,28 +578,28 @@ recv_again:
         return;
     }
 
-    ctx->b_recv = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
-    if (ctx->b_recv < 0)
+    bytes_recv = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
+    if (bytes_recv < 0)
     {
         LOG_ERROR("recv: %s", strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
     }
-    else if(ctx->b_recv < DATA_HDR_LEN)
+    else if (bytes_recv < DATA_HDR_LEN)
     {
         goto recv_again;
     }
 
     code = get_opcode(ctx->rx_buf);
     ctx->r_block_num = get_blocknum(ctx->rx_buf);
-    if(ctx->prev_code == CODE_ERROR)
+    if (code == CODE_ERROR)
     {
-        handle_error_packet(ctx->rx_buf, ctx->b_recv);
+        handle_error_packet(ctx->rx_buf, bytes_recv);
         return;
     }
     else if (code == CODE_ACK && ctx->r_block_num == ctx->e_block_num)
     {
-        ctx->curr_size += (off_t) bytes_read;
+        ctx->curr_size += (off_t)bytes_read;
         if (is_done)
             return;
         ctx->e_block_num++;
@@ -615,36 +617,44 @@ void tftp_recv_file(tftp_context *ctx)
     bool is_done = false;
 
     ssize_t bytes_written = 0;
+    ssize_t bytes_recv = 0;
+    ssize_t bytes_sent = 0;
     struct pollfd pfd = {0};
+
+    TFTP_OPCODE code = CODE_UNDEF;
 
     int retries = TFTP_NUM_RETRIES;
     int wait_time = TFTP_TIMEOUT_MS;
 
-    ctx->e_block_num = 2;
-    ctx->r_block_num = 1;
+    ctx->e_block_num = 1;
+    ctx->r_block_num = 0;
 
-    if (ctx->prev_code == CODE_OACK)
-    {
-        ctx->e_block_num = 1;
-        ctx->r_block_num = 0;
-        goto send_ack_packet;
-    }
+// In case of client on RRQ
+// We are sending the request
+// Or we are resending ACK0
+
+// In case of server on WRQ
+// We are resending ACK0
+// Or we are resending OACK
+
+    // goto send_again;
+    // retries++;
+    goto recv_again;
 
 write_next_block:
-    ctx->rx_len = (size_t) ctx->b_recv - DATA_HDR_LEN;
+    ctx->rx_len = (size_t)bytes_recv - DATA_HDR_LEN;
 
     if (ctx->rx_len < ctx->blk_size)
         is_done = true;
 
     bytes_written = s_write(ctx->file_desc, ctx->rx_buf + DATA_HDR_LEN, ctx->rx_len);
-    if ((size_t) bytes_written != ctx->rx_len)
+    if ((size_t)bytes_written != ctx->rx_len)
     {
         send_error_packet(ctx, ENOSPACE);
         return;
     }
-    ctx->curr_size += (off_t) ctx->rx_len;
+    ctx->curr_size += bytes_written;
 
-send_ack_packet:
     set_opcode(ctx->tx_buf, CODE_ACK);
     set_blocknum(ctx->tx_buf, ctx->r_block_num);
 
@@ -654,8 +664,8 @@ send_ack_packet:
     wait_time = TFTP_TIMEOUT_MS;
 
 send_again:
-    ctx->b_sent = send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
-    if (ctx->b_sent < 0)
+    bytes_sent = send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
+    if (bytes_sent < 0)
     {
         LOG_ERROR("send: %s", strerror(errno));
         return;
@@ -690,26 +700,26 @@ recv_again:
         return;
     }
 
-    ctx->b_recv = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
-    if (ctx->b_recv < 0)
+    bytes_recv = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
+    if (bytes_recv < 0)
     {
         LOG_ERROR("recv: %s", strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
     }
-    else if(ctx->b_recv < DATA_HDR_LEN)
+    else if (bytes_recv < DATA_HDR_LEN)
     {
         goto recv_again;
     }
 
-    ctx->prev_code = get_opcode(ctx->rx_buf);
+    code = get_opcode(ctx->rx_buf);
     ctx->r_block_num = get_blocknum(ctx->rx_buf);
-    if(ctx->prev_code == CODE_ERROR)
+    if (code == CODE_ERROR)
     {
-        handle_error_packet(ctx->rx_buf, ctx->b_recv);
+        handle_error_packet(ctx->rx_buf, bytes_recv);
         return;
     }
-    else if (ctx->prev_code == CODE_DATA && ctx->r_block_num == ctx->e_block_num)
+    else if (code == CODE_DATA && ctx->r_block_num == ctx->e_block_num)
     {
         ctx->e_block_num++;
         if (ctx->e_block_num > MAX_BLK_NUM)

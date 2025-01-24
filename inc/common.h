@@ -142,14 +142,10 @@ typedef struct
     size_t tx_len;
     size_t rx_len; 
 
-    ssize_t b_recv;
-    ssize_t b_sent;
-
     s4_addr addr;
     socklen_t a_len;
 
     int conn_sock;
-
     int file_desc;
 
     off_t file_size;
@@ -163,7 +159,6 @@ typedef struct
 
     TFTP_MODE mode;
     TFTP_OPCODE action;
-    TFTP_OPCODE prev_code;
 
     TFTP_ERRCODE err_code;
     char err_str[DEF_BLK_SIZE];
