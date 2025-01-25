@@ -183,7 +183,7 @@ int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_si
 int init_tftp_context(tftp_context * ctx, TFTP_OPCODE action, size_t b_size, size_t w_size);
 void free_tftp_context(tftp_context * ctx);
 
-void tftp_send_file(tftp_context *ctx);
-void tftp_recv_file(tftp_context *ctx, bool is_server);
+void tftp_send_file(tftp_context *ctx, bool send_first);
+void tftp_recv_file(tftp_context *ctx, bool send_first);
 
 #endif

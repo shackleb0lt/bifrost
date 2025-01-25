@@ -324,6 +324,7 @@ int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_si
             return -1;
         }
     }
+
     return 0;
 }
 
@@ -512,7 +513,7 @@ static void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code)
     send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
 }
 
-void tftp_send_file(tftp_context *ctx)
+void tftp_send_file(tftp_context *ctx, bool send_first)
 {
     int ret = 0;
     bool is_done = false;
@@ -528,6 +529,11 @@ void tftp_send_file(tftp_context *ctx)
 
     ctx->e_block_num = 0;
     ctx->r_block_num = 0;
+
+    if (send_first)
+    {
+        goto send_again;
+    }
 
 read_next_block:
     ctx->e_block_num++;
@@ -617,7 +623,7 @@ recv_again:
     goto recv_again;
 }
 
-void tftp_recv_file(tftp_context *ctx, bool is_server)
+void tftp_recv_file(tftp_context *ctx, bool send_first)
 {
     int ret = 0;
     bool is_done = false;
@@ -633,16 +639,14 @@ void tftp_recv_file(tftp_context *ctx, bool is_server)
     int wait_time = TFTP_TIMEOUT_MS;
 
     ctx->e_block_num = 1;
-    ctx->r_block_num = 1;
 
-    ctx->tx_len = DATA_HDR_LEN;
-    if (is_server)
+    if (send_first)
     {
-        ctx->r_block_num = 0;
-        set_opcode(ctx->tx_buf, CODE_ACK);
-        set_blocknum(ctx->tx_buf, ctx->r_block_num);
         goto send_again;
     }
+
+    ctx->r_block_num = 1;
+    ctx->tx_len = DATA_HDR_LEN;
 
 write_next_block:
     ctx->e_block_num++;

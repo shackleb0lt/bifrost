@@ -221,6 +221,7 @@ size_t parse_filename(tftp_context *ctx, char *filename)
 
 int validate_parameters(tftp_context *ctx, char *buf, size_t len)
 {
+    int ret = 0;
     off_t temp_size = -1;
     size_t curr_len = 0;
 
@@ -249,11 +250,6 @@ int validate_parameters(tftp_context *ctx, char *buf, size_t len)
         return -1;
     }
 
-    if (temp_size == -1)
-        ctx->file_size = -1;
-    else if (ctx->action == CODE_WRQ)
-        ctx->file_size = temp_size;
-
 allocate_buffer:
     ctx->BUF_SIZE = ctx->blk_size + DATA_HDR_LEN;
     ctx->tx_buf = (char *) malloc(ctx->BUF_SIZE);
@@ -275,6 +271,36 @@ allocate_buffer:
 
     memset(ctx->tx_buf, 0, ctx->BUF_SIZE);
     memset(ctx->rx_buf, 0, ctx->BUF_SIZE);
+
+    if (temp_size != -1)
+    {
+        if (ctx->action == CODE_WRQ)
+            ctx->file_size = temp_size;
+        else if (ctx->action == CODE_RRQ)
+            temp_size = ctx->file_size;
+    }
+
+    ret = insert_options(ctx->tx_buf + ARGS_HDR_LEN, ctx->BUF_SIZE - ARGS_HDR_LEN, ctx->blk_size, temp_size, ctx->win_size);
+    if (ret < 0)
+    {
+        send_error_packet(ctx->conn_sock, EUNDEF);
+        return 1;
+    }
+    else if (ret == 0)
+    {
+        return 0;
+    }
+
+    set_opcode(ctx->tx_buf, CODE_OACK);
+    ctx->tx_len = ARGS_HDR_LEN + (size_t) ret;
+    if (ctx->action == CODE_RRQ)
+    {
+        tftp_send_file(ctx, true);
+    }
+    else if (ctx->action == CODE_WRQ)
+    {
+        tftp_recv_file(ctx, true);
+    }
 
     return 0;
 }
@@ -313,13 +339,25 @@ void *handle_tftp_request(void *arg)
     {
         goto exit_transfer;
     }
+    else if (ret > 0)
+    {
+        goto cleanup_ctx;
+    }
 
     if (ctx.action == CODE_RRQ)
-        tftp_send_file(&ctx);
+    {
+        tftp_send_file(&ctx, false);
+    }
     else if (ctx.action == CODE_WRQ)
+    {
+        ctx.r_block_num = 0;
+        ctx.tx_len = DATA_HDR_LEN;
+        set_opcode(ctx.tx_buf, CODE_ACK);
+        set_blocknum(ctx.tx_buf, ctx.r_block_num);
         tftp_recv_file(&ctx, true);
+    }
 
-// cleanup_ctx:
+cleanup_ctx:
     free(ctx.tx_buf);
     free(ctx.rx_buf);
     close(ctx.file_desc);

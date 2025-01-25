@@ -227,7 +227,6 @@ int init_client_request(tftp_context *ctx)
     curr_ptr += option_len + 1;
     curr_len += option_len + 1;
 
-    ctx->file_size = -1;
     ret = insert_options(curr_ptr, DEF_BLK_SIZE - curr_len, ctx->blk_size, ctx->file_size, ctx->win_size);
     if (ret == -1)
     {
@@ -302,9 +301,17 @@ int parse_oack_string(tftp_context *ctx)
     }
 
     else if (ctx->action == CODE_RRQ)
+    {
+        ctx->r_block_num = 0;
+        ctx->tx_len = DATA_HDR_LEN;
+        set_opcode(ctx->tx_buf, CODE_ACK);
+        set_blocknum(ctx->tx_buf, ctx->r_block_num);
         tftp_recv_file(ctx, true);
+    }
     else if (ctx->action == CODE_WRQ)
-        tftp_send_file(ctx);
+    {
+        tftp_send_file(ctx, false);
+    }
 
     return 0;
 }
@@ -424,9 +431,13 @@ connect_socket:
             return -1;
     }
     else if (ctx->action == CODE_RRQ)
+    {
         tftp_recv_file(ctx, false);
+    }
     else if (ctx->action == CODE_WRQ)
-        tftp_send_file(ctx);
+    {
+        tftp_send_file(ctx, false);
+    }
 
     return 0;
 }
