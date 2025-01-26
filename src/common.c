@@ -37,8 +37,8 @@ const char *err_strs[] =
 };
 
 /**
- * Converts tftp error code to string
- * Returns a pointer to string literal
+ * Returns a string literal corresponding to the error code
+ * Note:- Function never returns NULL 
  */
 const char *tftp_err_to_str(TFTP_ERRCODE err_code)
 {
@@ -48,8 +48,9 @@ const char *tftp_err_to_str(TFTP_ERRCODE err_code)
 }
 
 /**
- * Returns a string literal corresponding to the
- * mode type received, returns "octet" by default
+ * Copies string corresponding to the mode into the buffer.
+ * Returns length of copied string
+ * By default or in case of error, "octet" is stored in the buffer.
  */
 size_t tftp_mode_to_str(TFTP_MODE mode, char mode_str[])
 {
@@ -296,7 +297,7 @@ int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_si
         }
         else if (is_valid_blocksize(val, blk_size) == false)
         {
-            LOG_ERROR("Received invalid block size %s", val);
+            LOG_ERROR("%s: Received invalid block size %s", __func__, val);
             return -1;
         }
     }
@@ -306,7 +307,7 @@ int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_si
         val = get_option_val(TSIZE_OP, buf, buf_len);
         if (val && is_valid_filesize(val, file_size) == false)
         {
-            LOG_ERROR("Received invalid file size %s", val);
+            LOG_ERROR("%s: Received invalid file size %s", __func__, val);
             return -1;
         }
     }
@@ -320,7 +321,7 @@ int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_si
         }
         else if (is_valid_windowsize(val, win_size) == false)
         {
-            LOG_ERROR("Received invalid window size %s", val);
+            LOG_ERROR("%s: Received invalid window size %s", __func__, val);
             return -1;
         }
     }
@@ -377,13 +378,17 @@ void handle_error_packet(char *rx_buf, ssize_t b_recv)
     else
         rx_buf[b_recv] = '\0';
 #ifdef DEBUG
-    LOG_ERROR("server error (%d): %s", err_code, rx_buf);
+    LOG_ERROR("(%d): %s", err_code, rx_buf);
 #else
-    LOG_ERROR("server error : %s", rx_buf);
+    LOG_ERROR("%s", rx_buf);
 
 #endif
 }
 
+/**
+ * Securely reads data upto 'count' bytes from a file descriptor into 'buf'
+ * Returns the length of data actually read or -1 in case or error
+ */
 ssize_t s_read(int fd, void *buf, size_t count)
 {
     ssize_t total_read = 0;
@@ -413,6 +418,10 @@ ssize_t s_read(int fd, void *buf, size_t count)
     return total_read;
 }
 
+/**
+ * Securely write data upto 'count' bytes to a file descriptor from 'buf'
+ * Returns the length of data actually written or -1 in case or error
+ */
 ssize_t s_write(int fd, const void *buf, size_t count)
 {
     ssize_t total_written = 0;
@@ -442,6 +451,11 @@ ssize_t s_write(int fd, const void *buf, size_t count)
     return total_written;
 }
 
+/**
+ * Initialises tftp_context struct, with passed values
+ * 
+ * Note: Only used by client program at the moment 
+ */
 int init_tftp_context(tftp_context *ctx, TFTP_OPCODE action, size_t blk_size, size_t w_size)
 {
     memset(ctx, 0, sizeof(tftp_context));
@@ -476,6 +490,11 @@ int init_tftp_context(tftp_context *ctx, TFTP_OPCODE action, size_t blk_size, si
     return 0;
 }
 
+/**
+ * Performs cleanup on tftp context, by closing open 
+ * sockets and file descriptor, also releases dynamically
+ * allocated memory if any
+ */
 void free_tftp_context(tftp_context *ctx)
 {
     if (ctx->tx_buf)
@@ -503,16 +522,31 @@ void free_tftp_context(tftp_context *ctx)
     }
 }
 
-static void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code)
+/**
+ * Converts error code to a string, or uses
+ * err_str contents to create an error packet 
+ * This packet is sent to the server/client
+ * indicating an error occurred and stop transfer
+ */
+void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code)
 {
-    set_opcode(ctx->tx_buf, CODE_ERROR);
-    set_blocknum(ctx->tx_buf, err_code);
+    size_t len = 0;
+    char buf[DATA_HDR_LEN + DEF_BLK_SIZE] = {0};
 
-    ctx->tx_len = DATA_HDR_LEN;
-    ctx->tx_len += (size_t)snprintf(ctx->tx_buf + DATA_HDR_LEN, ctx->blk_size, "%s", tftp_err_to_str(err_code));
-    send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
+    set_opcode(buf, CODE_ERROR);
+    set_blocknum(buf, err_code);
+    len += DATA_HDR_LEN;
+    if (ctx->err_str[0] == '\0')
+        len += (size_t) snprintf(buf + DATA_HDR_LEN, DEF_BLK_SIZE, "%s", tftp_err_to_str(err_code));
+    else
+        len += (size_t) snprintf(buf + DATA_HDR_LEN, DEF_BLK_SIZE, "%s", ctx->err_str);
+
+    send(ctx->conn_sock, buf, len, 0);
 }
 
+/**
+ * Common function used by client and server to send a file
+ */
 void tftp_send_file(tftp_context *ctx, bool send_first)
 {
     int ret = 0;
@@ -561,7 +595,7 @@ send_again:
     bytes_sent = send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
     if (bytes_sent < 0)
     {
-        LOG_ERROR("send: %s", strerror(errno));
+        LOG_ERROR("%s send: %s", __func__, strerror(errno));
         return;
     }
 
@@ -586,7 +620,7 @@ recv_again:
     }
     else if (ret < 0)
     {
-        LOG_ERROR("poll: %s", strerror(errno));
+        LOG_ERROR("%s poll: %s", __func__, strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
     }
@@ -594,13 +628,13 @@ recv_again:
     ctx->rx_len = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
     if (ctx->rx_len < 0)
     {
-        LOG_ERROR("recv: %s", strerror(errno));
+        LOG_ERROR("%s recv: %s",__func__, strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
     }
     else if (ctx->rx_len < DATA_HDR_LEN)
     {
-        LOG_ERROR("Received corrupted packet with length %ld", ctx->rx_len);
+        LOG_ERROR("%s: Received corrupted packet with length %ld", __func__, ctx->rx_len);
         goto recv_again;
     }
 
@@ -619,10 +653,13 @@ recv_again:
         goto read_next_block;
     }
 
-    LOG_ERROR("Received unexpected packet %d %lu", code, ctx->r_block_num);
+    LOG_ERROR("%s: Received unexpected packet %d %lu", __func__, code, ctx->r_block_num);
     goto recv_again;
 }
 
+/**
+ * Common function used by client and server to receive a file
+ */
 void tftp_recv_file(tftp_context *ctx, bool send_first)
 {
     int ret = 0;
@@ -675,7 +712,7 @@ send_again:
     bytes_sent = send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
     if (bytes_sent < 0)
     {
-        LOG_ERROR("send: %s", strerror(errno));
+        LOG_ERROR("%s send: %s", __func__, strerror(errno));
         return;
     }
 
@@ -703,7 +740,7 @@ recv_again:
     }
     else if (ret < 0)
     {
-        LOG_ERROR("poll: %s", strerror(errno));
+        LOG_ERROR("%s poll: %s", __func__, strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
     }
@@ -711,13 +748,13 @@ recv_again:
     ctx->rx_len = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
     if (ctx->rx_len < 0)
     {
-        LOG_ERROR("recv: %s", strerror(errno));
+        LOG_ERROR("%s recv: %s", __func__, strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
     }
     else if (ctx->rx_len < DATA_HDR_LEN)
     {
-        LOG_ERROR("Received corrupted packet with length %ld", ctx->rx_len);
+        LOG_ERROR("%s: Received corrupted packet with length %ld", __func__, ctx->rx_len);
         goto recv_again;
     }
 
@@ -733,6 +770,6 @@ recv_again:
         goto write_next_block;
     }
 
-    LOG_ERROR("Received unexpected packet %d %lu", code, ctx->r_block_num);
+    LOG_ERROR("%s: Received unexpected packet %d %lu", __func__, code, ctx->r_block_num);
     goto recv_again;
 }

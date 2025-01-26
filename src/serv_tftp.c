@@ -124,18 +124,6 @@ int connect_to_client(tftp_context *ctx)
     return 0;
 }
 
-static void send_error_packet(int sock, TFTP_ERRCODE err_code)
-{
-    size_t len = 0;
-    char buf[DATA_HDR_LEN + DEF_BLK_SIZE] = {0};
-
-    set_opcode(buf, CODE_ERROR);
-    set_blocknum(buf, err_code);
-    len += DATA_HDR_LEN;
-    len += (size_t) snprintf(buf + DATA_HDR_LEN, DEF_BLK_SIZE, "%s", tftp_err_to_str(err_code));
-    send(sock, buf, len, 0);
-}
-
 size_t parse_filename(tftp_context *ctx, char *filename)
 {
     char *ptr = NULL;
@@ -148,9 +136,9 @@ size_t parse_filename(tftp_context *ctx, char *filename)
     ptr = strrchr(temp, '/') + 1;
     if ((*ptr) == '\0')
     {
-        LOG_ERROR("Filename not provided %s", temp);
-        snprintf(ctx->err_str, DEF_BLK_SIZE, "Filename not provided");
-        send_error_packet(ctx->conn_sock, EUNDEF);
+        LOG_ERROR("Path is a directory %s", temp);
+        snprintf(ctx->err_str, DEF_BLK_SIZE, "Path is a directory");
+        send_error_packet(ctx, EUNDEF);
         return 0;
     }
 
@@ -163,14 +151,14 @@ size_t parse_filename(tftp_context *ctx, char *filename)
     if (realpath(temp, fullname) == NULL)
     {
         LOG_ERROR("Invalid filename %s: %s", temp, strerror(errno));
-        send_error_packet(ctx->conn_sock, ENOTFOUND);
+        send_error_packet(ctx, ENOTFOUND);
         return 0;
     }
 
     if (strncmp(fullname, TFTP_SERVER_PATH, strlen(TFTP_SERVER_PATH)) != 0)
     {
         LOG_ERROR("Illegal attempt to access %s", fullname);
-        send_error_packet(ctx->conn_sock, EACCESS);
+        send_error_packet(ctx, EACCESS);
         return 0;
     }
 
@@ -179,6 +167,7 @@ size_t parse_filename(tftp_context *ctx, char *filename)
         if (stat(fullname, &st) == -1)
         {
             LOG_ERROR("stat %s: %s", fullname, strerror(errno));
+            send_error_packet(ctx, EUNDEF);
             return 0;
         }
 
@@ -186,7 +175,7 @@ size_t parse_filename(tftp_context *ctx, char *filename)
         {
             LOG_ERROR("Path is a directory %s", fullname);
             snprintf(ctx->err_str, DEF_BLK_SIZE, "Path is a directory");
-            send_error_packet(ctx->conn_sock, EUNDEF);
+            send_error_packet(ctx, EBADOP);
             return 0;
         }
 
@@ -201,7 +190,7 @@ size_t parse_filename(tftp_context *ctx, char *filename)
         {
             LOG_ERROR("Path is prexisting directory %s", fullname);
             snprintf(ctx->err_str, DEF_BLK_SIZE, "Path is prexisting directory");
-            send_error_packet(ctx->conn_sock, EUNDEF);
+            send_error_packet(ctx, EBADOP);
             return 0;
         }
 
@@ -246,6 +235,7 @@ int validate_parameters(tftp_context *ctx, char *buf, size_t len)
 
     if (extract_options(buf, len, &ctx->blk_size, &temp_size, &ctx->win_size) < 0)
     {
+        send_error_packet(ctx, EBADOPT);
         close(ctx->file_desc);
         return -1;
     }
@@ -256,6 +246,7 @@ allocate_buffer:
     if (ctx->tx_buf == NULL)
     {
         LOG_ERROR("%s: malloc tx_buf: %s", __func__, strerror(errno));
+        send_error_packet(ctx, EUNDEF);
         close(ctx->file_desc);
         return -1;
     }
@@ -264,6 +255,7 @@ allocate_buffer:
     if (ctx->rx_buf == NULL)
     {
         LOG_ERROR("%s: malloc rx_buf: %s", __func__, strerror(errno));
+        send_error_packet(ctx, EUNDEF);
         close(ctx->file_desc);
         free(ctx->tx_buf);
         return -1;
@@ -283,7 +275,7 @@ allocate_buffer:
     ret = insert_options(ctx->tx_buf + ARGS_HDR_LEN, ctx->BUF_SIZE - ARGS_HDR_LEN, ctx->blk_size, temp_size, ctx->win_size);
     if (ret < 0)
     {
-        send_error_packet(ctx->conn_sock, EUNDEF);
+        send_error_packet(ctx, EUNDEF);
         return 1;
     }
     else if (ret == 0)
@@ -321,7 +313,7 @@ void *handle_tftp_request(void *arg)
 
     if (req->data_len <= ARGS_HDR_LEN)
     {
-        send_error_packet(ctx.conn_sock, EBADOP);
+        send_error_packet(&ctx, EBADOP);
         goto exit_transfer;
     }
 
@@ -330,7 +322,7 @@ void *handle_tftp_request(void *arg)
     ctx.action = get_opcode(req->data);
     if (ctx.action != CODE_RRQ && ctx.action != CODE_WRQ)
     {
-        send_error_packet(ctx.conn_sock, EBADOP);
+        send_error_packet(&ctx, EBADOP);
         goto exit_transfer;
     }
 
@@ -432,4 +424,6 @@ int main()
  *  - Check for MSG_TRUNC during incoming request
  *  - Remove MAX_FILE_SIZE limit as we have blk num roll over
  *  - Use threadpools
+ *  - Implement window size
+ *  - Add debug mode 
  */

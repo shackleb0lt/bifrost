@@ -176,6 +176,7 @@ size_t tftp_mode_to_str(TFTP_MODE mode, char mode_str[]);
 const char *tftp_err_to_str(TFTP_ERRCODE err_code);
 
 void handle_error_packet(char *buf, ssize_t buf_len);
+void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code);
 
 int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size, size_t win_size);
 int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_size, size_t *win_size);

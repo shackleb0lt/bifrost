@@ -253,7 +253,9 @@ int init_client_request(tftp_context *ctx)
 }
 
 /**
- *
+ * Parses the OACK packet sent by the server
+ * Extracts the file size in case of download
+ * Validates block size and window size acknowledgement
  */
 int parse_oack_string(tftp_context *ctx)
 {
@@ -274,7 +276,7 @@ int parse_oack_string(tftp_context *ctx)
     ret = extract_options(ctx->rx_buf + ARGS_HDR_LEN, ctx->rx_len - ARGS_HDR_LEN, blk_size, file_size, win_size);
     if (ret)
     {
-        // Send bad opt packet;
+        send_error_packet(ctx, EBADOPT);
         return -1;
     }
 
@@ -286,6 +288,7 @@ int parse_oack_string(tftp_context *ctx)
         if (ctx->tx_buf == NULL)
         {
             fprintf(stderr, "realloc: %s\n", strerror(errno));
+            send_error_packet(ctx, EUNDEF);
             return -1;
         }
 
@@ -293,6 +296,7 @@ int parse_oack_string(tftp_context *ctx)
         if (ctx->rx_buf == NULL)
         {
             fprintf(stderr, "realloc: %s\n", strerror(errno));
+            send_error_packet(ctx, EUNDEF);
             return -1;
         }
 
@@ -300,7 +304,7 @@ int parse_oack_string(tftp_context *ctx)
         memset(ctx->rx_buf, 0, ctx->BUF_SIZE);
     }
 
-    else if (ctx->action == CODE_RRQ)
+    if (ctx->action == CODE_RRQ)
     {
         ctx->r_block_num = 0;
         ctx->tx_len = DATA_HDR_LEN;
@@ -339,7 +343,7 @@ int tftp_connect(tftp_context *ctx)
     ctx->conn_sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (ctx->conn_sock < 0)
     {
-        fprintf(stderr, "socket %s\n", strerror(errno));
+        fprintf(stderr, "%s socket %s\n", __func__, strerror(errno));
         return -1;
     }
 
@@ -347,7 +351,7 @@ send_again:
     bytes_sent = sendto(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0, (s_addr *)&(ctx->addr), ctx->a_len);
     if (bytes_sent != (ssize_t)ctx->tx_len)
     {
-        fprintf(stderr, "sendto: %s\n", strerror(errno));
+        fprintf(stderr, "%s sendto: %s\n", __func__, strerror(errno));
         return -1;
     }
 
@@ -372,14 +376,14 @@ recv_again:
     }
     else if (ret < 0)
     {
-        fprintf(stderr, "poll: %s\n", strerror(errno));
+        fprintf(stderr, "%s poll: %s\n", __func__, strerror(errno));
         return -1;
     }
 
     ctx->rx_len = recvfrom(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0, (s_addr *)&ctx->addr, &(ctx->a_len));
     if (ctx->rx_len <= 0)
     {
-        fprintf(stderr, "recvfrom: %s\n", strerror(errno));
+        fprintf(stderr, "%s recvfrom: %s\n", __func__, strerror(errno));
         return -1;
     }
     else if (ctx->rx_len < DATA_HDR_LEN)
@@ -420,7 +424,7 @@ connect_socket:
     ret = connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->a_len);
     if (ret != 0)
     {
-        fprintf(stderr, "connect: %s\n", strerror(errno));
+        fprintf(stderr, "%s connect: %s\n", __func__, strerror(errno));
         return -1;
     }
 
