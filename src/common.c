@@ -36,6 +36,17 @@ const char *err_strs[] =
     "Bad option/s received"
 };
 
+const char *opcode_strs[] =
+{
+    "CODE_UNDEF",
+    "CODE_RRQ",
+    "CODE_WRQ",
+    "CODE_DATA",
+    "CODE_ACK",
+    "CODE_ERROR",
+    "CODE_OACK",    
+};
+
 /**
  * Returns a string literal corresponding to the error code
  * Note:- Function never returns NULL 
@@ -45,6 +56,21 @@ const char *tftp_err_to_str(TFTP_ERRCODE err_code)
     if (err_code > EBADOPT)
         err_code = EUNDEF;
     return err_strs[err_code];
+}
+
+/**
+ * Returns a string literal corresponding to the op code
+ * In case of unknown code, it is converted to string and returned 
+ */
+const char *tftp_opcode_to_str(TFTP_OPCODE opcode)
+{
+    static _Thread_local char conv[32] = {0};
+
+    if (opcode <= CODE_OACK)
+        return opcode_strs[opcode];
+
+    snprintf(conv, 32, "%d", opcode);
+    return (const char *) conv;
 }
 
 /**
@@ -364,6 +390,33 @@ int register_sighandler(void (*handler_func)(int))
 }
 
 /**
+ * Prints a tftp request buffer in presentable format
+ */
+void print_tftp_request(char * buf, size_t len)
+{
+    TFTP_OPCODE code = get_opcode(buf);
+    
+    LOG_RAW("[INFO] %s ", tftp_opcode_to_str(code)); 
+
+    buf += ARGS_HDR_LEN; 
+    len -= ARGS_HDR_LEN;
+
+    while(len)
+    {
+        size_t curr_len = strnlen(buf, DEF_BLK_SIZE);
+        LOG_RAW("%s ", buf);
+    
+        if (curr_len >= len)
+            break;
+    
+        len -= curr_len + 1;
+        buf += curr_len + 1;
+    }
+
+    LOG_RAW("\n");
+}
+
+/**
  * Parses the received packet to extract error code
  * and error message if any sent by the server.
  */
@@ -599,6 +652,10 @@ send_again:
         return;
     }
 
+#ifdef PACKET_DEBUG
+        LOG_INFO("Sent DATA %lu size %ld", ctx->e_block_num, ctx->tx_len - DATA_HDR_LEN);
+#endif
+
 recv_again:
     pfd.fd = ctx->conn_sock;
     pfd.events = POLLIN;
@@ -647,13 +704,17 @@ recv_again:
     }
     else if (code == CODE_ACK && ctx->r_block_num == ctx->e_block_num)
     {
+#ifdef PACKET_DEBUG
+        LOG_INFO("Received ACK %lu", ctx->r_block_num);
+#endif
         ctx->curr_size += (off_t)bytes_read;
         if (is_done)
             return;
         goto read_next_block;
     }
-
-    LOG_ERROR("%s: Received unexpected packet %d %lu", __func__, code, ctx->r_block_num);
+#ifdef DEBUG
+    LOG_ERROR("%s: Received unexpected packet %s %lu", __func__, tftp_opcode_to_str(code), ctx->r_block_num);
+#endif
     goto recv_again;
 }
 
@@ -686,10 +747,6 @@ void tftp_recv_file(tftp_context *ctx, bool send_first)
     ctx->tx_len = DATA_HDR_LEN;
 
 write_next_block:
-    ctx->e_block_num++;
-    if (ctx->e_block_num > MAX_BLK_NUM)
-        ctx->e_block_num = 0;
-
     bytes_recv = (size_t) ctx->rx_len - DATA_HDR_LEN;
     if (bytes_recv < ctx->blk_size)
         is_done = true;
@@ -701,6 +758,10 @@ write_next_block:
         return;
     }
     ctx->curr_size += (off_t) bytes_written;
+
+    ctx->e_block_num++;
+    if (ctx->e_block_num > MAX_BLK_NUM)
+        ctx->e_block_num = 0;
 
     set_opcode(ctx->tx_buf, CODE_ACK);
     set_blocknum(ctx->tx_buf, ctx->r_block_num);
@@ -715,6 +776,9 @@ send_again:
         LOG_ERROR("%s send: %s", __func__, strerror(errno));
         return;
     }
+#ifdef PACKET_DEBUG
+    LOG_INFO("Sent ACK %lu", ctx->r_block_num);
+#endif
 
     if (is_done)
         return;
@@ -767,9 +831,14 @@ recv_again:
     }
     else if (code == CODE_DATA && ctx->r_block_num == ctx->e_block_num)
     {
+#ifdef PACKET_DEBUG
+        LOG_INFO("Received DATA %lu size %ld", ctx->r_block_num, ctx->rx_len - DATA_HDR_LEN);
+#endif
         goto write_next_block;
     }
 
-    LOG_ERROR("%s: Received unexpected packet %d %lu", __func__, code, ctx->r_block_num);
+#ifdef DEBUG
+    LOG_ERROR("%s: Received unexpected packet %s %lu", __func__, tftp_opcode_to_str(code), ctx->r_block_num);
+#endif
     goto recv_again;
 }

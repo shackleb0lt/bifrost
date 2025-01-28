@@ -285,6 +285,10 @@ allocate_buffer:
 
     set_opcode(ctx->tx_buf, CODE_OACK);
     ctx->tx_len = ARGS_HDR_LEN + (size_t) ret;
+
+    print_tftp_request(ctx->tx_buf, ctx->tx_len);
+    LOG_RAW("_____________________________________________________________________\n");
+
     if (ctx->action == CODE_RRQ)
     {
         tftp_send_file(ctx, true);
@@ -294,18 +298,23 @@ allocate_buffer:
         tftp_recv_file(ctx, true);
     }
 
-    return 0;
+    return 1;
 }
 
 void *handle_tftp_request(void *arg)
 {
     tftp_request *req = (tftp_request *)arg;
+    char ip_str[INET6_ADDRSTRLEN] = {0};
     tftp_context ctx = {0};
     int ret = 0;
 
     memset(&ctx, 0, sizeof(tftp_context));
     ctx.a_len = SOCKADDR_SIZE;
     memcpy(&(ctx.addr), &(req->client_addr), ctx.a_len);
+
+    inet_ntop(AF_INET, &(req->client_addr.sin_addr), ip_str, INET6_ADDRSTRLEN);
+    LOG_RAW("_____________________________________________________________________\n");
+    LOG_INFO("Incoming request from %s %d", ip_str, ntohs(req->client_addr.sin_port));
 
     ret = connect_to_client(&ctx);
     if (ret < 0)
@@ -318,6 +327,8 @@ void *handle_tftp_request(void *arg)
     }
 
     req->data[REQUEST_SIZE - 1] = '\0';
+
+    print_tftp_request(req->data, (size_t) req->data_len);
 
     ctx.action = get_opcode(req->data);
     if (ctx.action != CODE_RRQ && ctx.action != CODE_WRQ)
@@ -335,6 +346,8 @@ void *handle_tftp_request(void *arg)
     {
         goto cleanup_ctx;
     }
+
+    LOG_RAW("_____________________________________________________________________\n");
 
     if (ctx.action == CODE_RRQ)
     {
@@ -421,6 +434,8 @@ int main()
 }
 
 /**
+ *  - Use 512 bytes for sending client request not blk_size string.
+ * 
  *  - Check for MSG_TRUNC during incoming request
  *  - Remove MAX_FILE_SIZE limit as we have blk num roll over
  *  - Use threadpools

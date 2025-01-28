@@ -236,18 +236,8 @@ int init_client_request(tftp_context *ctx)
 
     ctx->tx_len = curr_len + (size_t)ret;
     ctx->is_oack = (ret > 0);
-
-#if 0
-    size_t i = 0;
-    for(i = 2; i < ctx->tx_len; i++)
-    {
-        if (ctx->tx_buf[i] == '\0')
-            printf(" ");
-        else
-            printf("%c",ctx->tx_buf[i]);
-
-    }
-    printf("\n");
+#ifdef DEBUG
+    print_tftp_request(ctx->tx_buf, ctx->tx_len);
 #endif
     return 0;
 }
@@ -273,7 +263,7 @@ int parse_oack_string(tftp_context *ctx)
     if (ctx->file_size == 0 && ctx->action == CODE_RRQ)
         file_size = &(ctx->file_size);
 
-    ret = extract_options(ctx->rx_buf + ARGS_HDR_LEN, ctx->rx_len - ARGS_HDR_LEN, blk_size, file_size, win_size);
+    ret = extract_options(ctx->rx_buf + ARGS_HDR_LEN, (size_t) ctx->rx_len - ARGS_HDR_LEN, blk_size, file_size, win_size);
     if (ret)
     {
         send_error_packet(ctx, EBADOPT);

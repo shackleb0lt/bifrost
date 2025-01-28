@@ -46,6 +46,8 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
+// #define PACKET_DEBUG 1
+
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 
@@ -88,7 +90,8 @@
 #define WINSIZE_OP      "windowsize"
 #define WINSIZE_OPLEN   10
 
-#define LOG_INFO(fmt, ...) do { fprintf(stdout, "[INFO] "fmt"\n", ##__VA_ARGS__); fflush(stdout);} while (false) 
+#define LOG_INFO(fmt, ...) do { fprintf(stdout, "[INFO] "fmt"\n", ##__VA_ARGS__); fflush(stdout);} while (false)
+#define LOG_RAW(fmt, ...) do { fprintf(stdout, fmt, ##__VA_ARGS__); fflush(stdout);} while (false)
 #define LOG_ERROR(fmt, ...) do { fprintf(stderr, "[ERROR] "fmt"\n", ##__VA_ARGS__); fflush(stderr);} while (false)
 
 typedef struct sockaddr s_addr;
@@ -173,7 +176,10 @@ bool is_valid_windowsize(const char *size_str, size_t *win_size);
 bool is_valid_portnum(const char *size_str, uint16_t *port_num);
 
 size_t tftp_mode_to_str(TFTP_MODE mode, char mode_str[]);
+const char *tftp_opcode_to_str(TFTP_OPCODE opcode);
 const char *tftp_err_to_str(TFTP_ERRCODE err_code);
+
+void print_tftp_request(char * buf, size_t len);
 
 void handle_error_packet(char *buf, ssize_t buf_len);
 void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code);
