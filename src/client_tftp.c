@@ -254,6 +254,10 @@ int parse_oack_string(tftp_context *ctx)
     size_t *win_size = NULL;
     off_t *file_size = NULL;
 
+#ifdef DEBUG
+    print_tftp_request(ctx->rx_buf, ctx->rx_len);
+#endif
+
     if (ctx->blk_size != DEF_BLK_SIZE)
         blk_size = &(ctx->blk_size);
 
@@ -386,6 +390,9 @@ recv_again:
         fprintf(stderr, "Received response from unknown IP address\n");
         return -1;
     }
+#ifdef DEBUG
+    LOG_INFO("Transfer ID %d", ntohs(ctx->addr.sin_port));
+#endif
 
     code = get_opcode(ctx->rx_buf);
     block_num = get_blocknum(ctx->rx_buf);
@@ -407,7 +414,9 @@ recv_again:
         goto connect_socket;
     }
 
+#ifdef DEBUG
     LOG_ERROR("Recieved unexpected opcode %d block num %d", code, block_num);
+#endif
     goto recv_again;
 
 connect_socket:
