@@ -255,7 +255,7 @@ int parse_oack_string(tftp_context *ctx)
     off_t *file_size = NULL;
 
 #ifdef DEBUG
-    print_tftp_request(ctx->rx_buf, ctx->rx_len);
+    print_tftp_request(ctx->rx_buf, (size_t)ctx->rx_len);
 #endif
 
     if (ctx->blk_size != DEF_BLK_SIZE)

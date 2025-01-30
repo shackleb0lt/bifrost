@@ -49,7 +49,7 @@ const char *opcode_strs[] =
 
 /**
  * Returns a string literal corresponding to the error code
- * Note:- Function never returns NULL 
+ * Note:- Function never returns NULL
  */
 const char *tftp_err_to_str(TFTP_ERRCODE err_code)
 {
@@ -60,7 +60,7 @@ const char *tftp_err_to_str(TFTP_ERRCODE err_code)
 
 /**
  * Returns a string literal corresponding to the op code
- * In case of unknown code, it is converted to string and returned 
+ * In case of unknown code, it is converted to string and returned
  */
 const char *tftp_opcode_to_str(TFTP_OPCODE opcode)
 {
@@ -70,7 +70,7 @@ const char *tftp_opcode_to_str(TFTP_OPCODE opcode)
         return opcode_strs[opcode];
 
     snprintf(conv, 32, "%d", opcode);
-    return (const char *) conv;
+    return (const char *)conv;
 }
 
 /**
@@ -392,23 +392,22 @@ int register_sighandler(void (*handler_func)(int))
 /**
  * Prints a tftp request buffer in presentable format
  */
-void print_tftp_request(char * buf, size_t len)
+void print_tftp_request(char *buf, size_t len)
 {
     TFTP_OPCODE code = get_opcode(buf);
-    
-    LOG_RAW("[INFO] %s ", tftp_opcode_to_str(code)); 
+    LOG_RAW("[INFO ] %s ", tftp_opcode_to_str(code));
 
-    buf += ARGS_HDR_LEN; 
+    buf += ARGS_HDR_LEN;
     len -= ARGS_HDR_LEN;
 
-    while(len)
+    while (len)
     {
         size_t curr_len = strnlen(buf, DEF_BLK_SIZE);
         LOG_RAW("%s ", buf);
-    
+
         if (curr_len >= len)
             break;
-    
+
         len -= curr_len + 1;
         buf += curr_len + 1;
     }
@@ -434,7 +433,6 @@ void handle_error_packet(char *rx_buf, ssize_t b_recv)
     LOG_ERROR("(%d): %s", err_code, rx_buf);
 #else
     LOG_ERROR("%s", rx_buf);
-
 #endif
 }
 
@@ -506,8 +504,8 @@ ssize_t s_write(int fd, const void *buf, size_t count)
 
 /**
  * Initialises tftp_context struct, with passed values
- * 
- * Note: Only used by client program at the moment 
+ *
+ * Note: Only used by client program at the moment
  */
 int init_tftp_context(tftp_context *ctx, TFTP_OPCODE action, size_t blk_size, size_t w_size)
 {
@@ -544,7 +542,7 @@ int init_tftp_context(tftp_context *ctx, TFTP_OPCODE action, size_t blk_size, si
 }
 
 /**
- * Performs cleanup on tftp context, by closing open 
+ * Performs cleanup on tftp context, by closing open
  * sockets and file descriptor, also releases dynamically
  * allocated memory if any
  */
@@ -577,7 +575,7 @@ void free_tftp_context(tftp_context *ctx)
 
 /**
  * Converts error code to a string, or uses
- * err_str contents to create an error packet 
+ * err_str contents to create an error packet
  * This packet is sent to the server/client
  * indicating an error occurred and stop transfer
  */
@@ -590,9 +588,9 @@ void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code)
     set_blocknum(buf, err_code);
     len += DATA_HDR_LEN;
     if (ctx->err_str[0] == '\0')
-        len += (size_t) snprintf(buf + DATA_HDR_LEN, DEF_BLK_SIZE, "%s", tftp_err_to_str(err_code));
+        len += (size_t)snprintf(buf + DATA_HDR_LEN, DEF_BLK_SIZE, "%s", tftp_err_to_str(err_code));
     else
-        len += (size_t) snprintf(buf + DATA_HDR_LEN, DEF_BLK_SIZE, "%s", ctx->err_str);
+        len += (size_t)snprintf(buf + DATA_HDR_LEN, DEF_BLK_SIZE, "%s", ctx->err_str);
 
     send(ctx->conn_sock, buf, len, 0);
 }
@@ -626,7 +624,7 @@ read_next_block:
     ctx->e_block_num++;
     if (ctx->e_block_num > MAX_BLK_NUM)
         ctx->e_block_num = 0;
-    
+
     bytes_read = s_read(ctx->file_desc, ctx->tx_buf + DATA_HDR_LEN, ctx->blk_size);
     if (bytes_read < 0)
     {
@@ -653,7 +651,10 @@ send_again:
     }
 
 #ifdef PACKET_DEBUG
+    if (get_opcode(ctx->tx_buf) == CODE_DATA)
         LOG_INFO("Sent DATA %lu size %ld", ctx->e_block_num, ctx->tx_len - DATA_HDR_LEN);
+    else
+        LOG_INFO("Sent %s", tftp_opcode_to_str(get_opcode(ctx->tx_buf)));
 #endif
 
 recv_again:
@@ -685,7 +686,7 @@ recv_again:
     ctx->rx_len = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
     if (ctx->rx_len < 0)
     {
-        LOG_ERROR("%s recv: %s",__func__, strerror(errno));
+        LOG_ERROR("%s recv: %s", __func__, strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
     }
@@ -714,6 +715,7 @@ recv_again:
     }
 #ifdef DEBUG
     LOG_ERROR("%s: Received unexpected packet %s %lu", __func__, tftp_opcode_to_str(code), ctx->r_block_num);
+    LOG_ERROR("%s: Expected packet %s %lu", __func__, tftp_opcode_to_str(CODE_ACK), ctx->e_block_num);
 #endif
     goto recv_again;
 }
@@ -727,7 +729,7 @@ void tftp_recv_file(tftp_context *ctx, bool send_first)
     bool is_done = false;
 
     ssize_t bytes_written = 0;
-    size_t  bytes_recv = 0;
+    size_t bytes_recv = 0;
     ssize_t bytes_sent = 0;
     struct pollfd pfd = {0};
 
@@ -747,7 +749,7 @@ void tftp_recv_file(tftp_context *ctx, bool send_first)
     ctx->tx_len = DATA_HDR_LEN;
 
 write_next_block:
-    bytes_recv = (size_t) ctx->rx_len - DATA_HDR_LEN;
+    bytes_recv = (size_t)ctx->rx_len - DATA_HDR_LEN;
     if (bytes_recv < ctx->blk_size)
         is_done = true;
 
@@ -757,7 +759,7 @@ write_next_block:
         send_error_packet(ctx, ENOSPACE);
         return;
     }
-    ctx->curr_size += (off_t) bytes_written;
+    ctx->curr_size += (off_t)bytes_written;
 
     ctx->e_block_num++;
     if (ctx->e_block_num > MAX_BLK_NUM)
@@ -777,7 +779,10 @@ send_again:
         return;
     }
 #ifdef PACKET_DEBUG
-    LOG_INFO("Sent ACK %lu", ctx->r_block_num);
+    if (get_opcode(ctx->tx_buf) == CODE_ACK)
+        LOG_INFO("Sent ACK %lu", ctx->r_block_num);
+    else
+        LOG_INFO("Sent %s", tftp_opcode_to_str(get_opcode(ctx->tx_buf)));
 #endif
 
     if (is_done)
@@ -839,6 +844,7 @@ recv_again:
 
 #ifdef DEBUG
     LOG_ERROR("%s: Received unexpected packet %s %lu", __func__, tftp_opcode_to_str(code), ctx->r_block_num);
+    LOG_ERROR("%s: Expected packet %s %lu", __func__, tftp_opcode_to_str(CODE_DATA), ctx->e_block_num);
 #endif
     goto recv_again;
 }

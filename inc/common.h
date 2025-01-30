@@ -46,7 +46,8 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-// #define PACKET_DEBUG 1
+#define PACKET_DEBUG 1
+// #define PACKET_LOG_FILE "/tmp/pkt_bifrost.log"
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -90,9 +91,10 @@
 #define WINSIZE_OP      "windowsize"
 #define WINSIZE_OPLEN   10
 
-#define LOG_INFO(fmt, ...) do { fprintf(stdout, "[INFO] "fmt"\n", ##__VA_ARGS__); fflush(stdout);} while (false)
+#define LOG_INFO(fmt, ...) do { fprintf(stdout, "[INFO ] "fmt"\n", ##__VA_ARGS__); fflush(stdout);} while (false)
 #define LOG_RAW(fmt, ...) do { fprintf(stdout, fmt, ##__VA_ARGS__); fflush(stdout);} while (false)
 #define LOG_ERROR(fmt, ...) do { fprintf(stderr, "[ERROR] "fmt"\n", ##__VA_ARGS__); fflush(stderr);} while (false)
+// #define LOG_PKT(fmt, ...) do { fprintf(, fmt"\n", ##__VA_ARGS__); fflush(stderr);} while (false)
 
 typedef struct sockaddr s_addr;
 typedef struct sockaddr_in s4_addr;
