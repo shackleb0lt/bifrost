@@ -603,6 +603,7 @@ void tftp_send_file(tftp_context *ctx, bool send_first)
     int ret = 0;
     bool is_done = false;
 
+    size_t win_blk_num = 0;
     ssize_t bytes_read = 0;
     ssize_t bytes_sent = 0;
     struct pollfd pfd = {0};
@@ -639,6 +640,8 @@ read_next_block:
     if (ctx->tx_len < ctx->BUF_SIZE)
         is_done = true;
 
+    win_blk_num++;
+
     retries = TFTP_NUM_RETRIES;
     wait_time = TFTP_TIMEOUT_MS;
 
@@ -656,6 +659,13 @@ send_again:
     else
         LOG_INFO("Sent %s", tftp_opcode_to_str(get_opcode(ctx->tx_buf)));
 #endif
+    if (win_blk_num >= ctx->win_size || is_done || send_first)
+    {
+        send_first = false;
+        win_blk_num = 0;
+        goto recv_again;
+    }
+    goto read_next_block;
 
 recv_again:
     pfd.fd = ctx->conn_sock;
@@ -728,6 +738,7 @@ void tftp_recv_file(tftp_context *ctx, bool send_first)
     int ret = 0;
     bool is_done = false;
 
+    size_t win_blk_num = 0;
     ssize_t bytes_written = 0;
     size_t bytes_recv = 0;
     ssize_t bytes_sent = 0;
@@ -770,6 +781,15 @@ write_next_block:
 
     retries = TFTP_NUM_RETRIES;
     wait_time = TFTP_TIMEOUT_MS;
+
+    win_blk_num++;
+
+    if (win_blk_num >= ctx->win_size || is_done == true)
+    {
+        win_blk_num = 0;
+        goto send_again;
+    }
+    goto recv_again;
 
 send_again:
     bytes_sent = send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
