@@ -47,6 +47,7 @@
 #include <netinet/in.h>
 
 // #define PACKET_DEBUG 1
+#define PACKET_LOG_FILE "/tmp/pkt_bifrost.log"
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -79,7 +80,7 @@
 #define DATA_HDR_LEN    4
 #define ARGS_HDR_LEN    2   
 
-#define TFTP_TIMEOUT_MS            200
+#define TFTP_TIMEOUT_MS            500
 #define TFTP_MAXTIMEOUT_MS        3000
 #define TFTP_NUM_RETRIES            12
 
@@ -90,7 +91,7 @@
 #define WINSIZE_OP      "windowsize"
 #define WINSIZE_OPLEN   10
 
-#define LOG_INFO(fmt, ...) do { fprintf(stdout, "[INFO] "fmt"\n", ##__VA_ARGS__); fflush(stdout);} while (false)
+#define LOG_INFO(fmt, ...) do { fprintf(stdout, "[INFO ] "fmt"\n", ##__VA_ARGS__); fflush(stdout);} while (false)
 #define LOG_RAW(fmt, ...) do { fprintf(stdout, fmt, ##__VA_ARGS__); fflush(stdout);} while (false)
 #define LOG_ERROR(fmt, ...) do { fprintf(stderr, "[ERROR] "fmt"\n", ##__VA_ARGS__); fflush(stderr);} while (false)
 
