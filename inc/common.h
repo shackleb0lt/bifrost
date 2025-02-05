@@ -78,11 +78,11 @@
 #define PATH_LEN        500
 #define TFTP_PORT_NO    69
 #define DATA_HDR_LEN    4
-#define ARGS_HDR_LEN    2   
+#define ARGS_HDR_LEN    2
 
-#define TFTP_TIMEOUT_MS            300
+#define TFTP_TIMEOUT_MS            500
 #define TFTP_MAXTIMEOUT_MS        3000
-#define TFTP_NUM_RETRIES            12
+#define TFTP_NUM_RETRIES            10
 
 #define BLKSIZE_OP      "blksize"
 #define BLKSIZE_OPLEN   7
