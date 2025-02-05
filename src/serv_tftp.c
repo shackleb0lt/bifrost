@@ -240,7 +240,7 @@ int validate_parameters(tftp_context *ctx, char *buf, size_t len)
     buf += curr_len;
     len -= curr_len;
 
-    if (extract_options(buf, len, &ctx->blk_size, &temp_size, &ctx->win_size) < 0)
+    if (extract_options(buf, len, &ctx->blk_size, &temp_size, NULL) < 0)
     {
         send_error_packet(ctx, EBADOPT);
         close(ctx->file_desc);
@@ -279,7 +279,7 @@ allocate_buffer:
             temp_size = ctx->file_size;
     }
 
-    ret = insert_options(ctx->tx_buf + ARGS_HDR_LEN, ctx->BUF_SIZE - ARGS_HDR_LEN, ctx->blk_size, temp_size, ctx->win_size);
+    ret = insert_options(ctx->tx_buf + ARGS_HDR_LEN, ctx->BUF_SIZE - ARGS_HDR_LEN, ctx->blk_size, temp_size, DEF_WIN_SIZE);
     if (ret < 0)
     {
         send_error_packet(ctx, EUNDEF);

@@ -43,7 +43,6 @@ void print_usage(char *err_str)
     printf("  %-18s Local file path\n",     "-l FILE");
     printf("  %-18s Remote file path\n",    "-r FILE");
     printf("  %-18s Transfer block size 8 - 65464\n", "-b SIZE");
-    printf("  %-18s Transfer window size 1 - 65536\n", "-w COUNT");
     printf("  %-18s Do not display progress bar\n", "-q");
     printf("  %-18s show usage and exit\n", "-h");
     printf("Note: Option -p or -g is mandatory, and they are mutually exclusive\n");
@@ -227,7 +226,7 @@ int init_client_request(tftp_context *ctx)
     curr_ptr += option_len + 1;
     curr_len += option_len + 1;
 
-    ret = insert_options(curr_ptr, DEF_BLK_SIZE - curr_len, ctx->blk_size, ctx->file_size, ctx->win_size);
+    ret = insert_options(curr_ptr, DEF_BLK_SIZE - curr_len, ctx->blk_size, ctx->file_size, DEF_WIN_SIZE);
     if (ret == -1)
     {
         fprintf(stderr, "Remote file name is too long\n");
@@ -251,7 +250,6 @@ int parse_oack_string(tftp_context *ctx)
 {
     int ret = 0;
     size_t *blk_size = NULL;
-    size_t *win_size = NULL;
     off_t *file_size = NULL;
 
 #ifdef DEBUG
@@ -261,13 +259,11 @@ int parse_oack_string(tftp_context *ctx)
     if (ctx->blk_size != DEF_BLK_SIZE)
         blk_size = &(ctx->blk_size);
 
-    if (ctx->win_size != DEF_WIN_SIZE)
-        win_size = &(ctx->win_size);
 
     if (ctx->file_size == 0 && ctx->action == CODE_RRQ)
         file_size = &(ctx->file_size);
 
-    ret = extract_options(ctx->rx_buf + ARGS_HDR_LEN, (size_t) ctx->rx_len - ARGS_HDR_LEN, blk_size, file_size, win_size);
+    ret = extract_options(ctx->rx_buf + ARGS_HDR_LEN, (size_t) ctx->rx_len - ARGS_HDR_LEN, blk_size, file_size, NULL);
     if (ret)
     {
         send_error_packet(ctx, EBADOPT);
@@ -450,7 +446,6 @@ int main(int argc, char *argv[])
     int ret = 0;
     tftp_context *ctx = &(g_sess_args.tftp_ctx);
     TFTP_OPCODE action = CODE_UNDEF;
-    size_t win_size = DEF_WIN_SIZE;
     size_t block_size = DEF_BLK_SIZE;
 
 #ifdef TIMER_ON
@@ -466,7 +461,7 @@ int main(int argc, char *argv[])
     if (ret != 0)
         return EXIT_FAILURE;
 
-    while ((ret = getopt(argc, argv, "l:r:b:w:gpqh")) != -1)
+    while ((ret = getopt(argc, argv, "l:r:b:gpqh")) != -1)
     {
         switch (ret)
         {
@@ -475,16 +470,6 @@ int main(int argc, char *argv[])
                 if (!is_valid_blocksize(optarg, &block_size))
                 {
                     printf("Invalid Block Size %s\n", optarg);
-                    print_usage("");
-                    return EXIT_FAILURE;
-                }
-                break;
-            }
-            case 'w':
-            {
-                if (!is_valid_windowsize(optarg, &win_size))
-                {
-                    printf("Invalid Window Size %s\n", optarg);
                     print_usage("");
                     return EXIT_FAILURE;
                 }
@@ -585,7 +570,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    ret = init_tftp_context(ctx, action, block_size, win_size);
+    ret = init_tftp_context(ctx, action, block_size, DEF_WIN_SIZE);
     if (ret)
         return EXIT_FAILURE;
 
