@@ -453,6 +453,12 @@ int main(int argc, char *argv[])
     size_t win_size = DEF_WIN_SIZE;
     size_t block_size = DEF_BLK_SIZE;
 
+#ifdef TIMER_ON
+    double elapsed = 0;
+    struct timespec start = {0};
+    struct timespec end = {0};
+#endif
+
     g_exe_name = argv[0];
     memset(&g_sess_args, 0, sizeof(tftp_client));
 
@@ -604,6 +610,10 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
+#ifdef TIMER_ON
+    clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
+
     ret = tftp_connect(ctx);
     if (ret)
     {
@@ -611,7 +621,12 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    fflush(stderr);
-    fflush(stdout);
+#ifdef TIMER_ON
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    elapsed = (double)(end.tv_sec - start.tv_sec) * 1000.0 +
+              (double)(end.tv_nsec - start.tv_nsec) / 1e6;
+    LOG_INFO("Elapsed time: %.3f ms", elapsed);
+#endif
+
     return 0;
 }

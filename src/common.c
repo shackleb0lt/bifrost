@@ -793,7 +793,6 @@ recv_again:
     pfd.events = POLLIN;
     ret = poll(&pfd, 1, wait_time);
 
-    retries--;
     if (retries == 0)
     {
         LOG_ERROR("TFTP timeout\n");
@@ -802,6 +801,7 @@ recv_again:
 
     if (ret == 0)
     {
+        retries--;
         wait_time += (wait_time >> 1);
         if (wait_time > TFTP_MAXTIMEOUT_MS)
             wait_time = TFTP_MAXTIMEOUT_MS;
@@ -823,6 +823,7 @@ recv_again:
     }
     else if (ctx->rx_len < DATA_HDR_LEN)
     {
+        retries--;
         LOG_ERROR("%s: Received corrupted packet with length %ld", __func__, ctx->rx_len);
         goto recv_again;
     }

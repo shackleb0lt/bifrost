@@ -67,7 +67,7 @@ int redirect_output()
 int initiate_server()
 {
     int sock_fd = -1;
-
+    int opt = 1;
     s4_addr saddr = {0};
     socklen_t sa_len = SOCKADDR_SIZE;
 
@@ -80,6 +80,13 @@ int initiate_server()
     if (sock_fd < 0)
     {
         LOG_ERROR("socket: %s", strerror(errno));
+        return -1;
+    }
+
+    if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)))
+    {
+        LOG_ERROR("setsockopt: %s", strerror(errno));
+        close(sock_fd);
         return -1;
     }
 
