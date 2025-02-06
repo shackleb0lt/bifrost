@@ -338,11 +338,6 @@ int tftp_connect(tftp_context *ctx)
     uint16_t block_num = 0;
     struct pollfd pfd = {0};
 
-    socklen_t saved_addr_len = ctx->addr_len;
-    struct sockaddr_storage saved_addr = {0};
-
-    memcpy(&saved_addr, &(ctx->addr), ctx->addr_len);
-
     ctx->conn_sock = socket(ctx->addr.ss_family, SOCK_DGRAM, 0);
     if (ctx->conn_sock < 0)
     {
@@ -383,7 +378,7 @@ recv_again:
         return -1;
     }
 
-    ctx->rx_len = recvfrom(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0, (s_addr *)&ctx->addr, &(ctx->addr_len));
+    ctx->rx_len = recvfrom(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0, (s_addr *)&(ctx->addr), &ctx->addr_len);
     if (ctx->rx_len <= 0)
     {
         LOG_ERROR("%s recvfrom: %s", __func__, strerror(errno));
@@ -392,11 +387,6 @@ recv_again:
     else if (ctx->rx_len < DATA_HDR_LEN)
     {
         LOG_ERROR("Received corrupted packet with length %ld", ctx->rx_len);
-        goto recv_again;
-    }
-    else if (ctx->addr_len != saved_addr_len)
-    {
-        LOG_ERROR("Received response from unknown IP address");
         goto recv_again;
     }
 
