@@ -61,7 +61,7 @@ make release
 
 ### TFTP Server
 
-To start the TFTP server first change the working directory to bld and launch as below, by default the server binds to all interfaces (ipv4 and ipv6) and listens on port **6969**; you can use the port 69 with sudo priveleges. Default path for server root is /srv/tftp/.
+To start the TFTP server first change the working directory to bld and launch as below, by default the server binds to all interfaces (ipv4 and ipv6) and listens on port **6969**; to use the port 69 sudo priveleges are required. Default path for server root is /srv/tftp/.
 
 ```bash
 ./serv_tftp -i <ip_addr> -p <port num> -s <server root path>
