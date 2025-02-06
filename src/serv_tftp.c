@@ -67,30 +67,38 @@ int redirect_output()
 int initiate_server()
 {
     int sock_fd = -1;
-    int opt = 1;
-    s4_addr saddr = {0};
-    socklen_t sa_len = SOCKADDR_SIZE;
+    int opt = 0;
+    struct sockaddr_in6 server_addr = {0};
 
-    memset(&saddr, 0, sa_len);
-    saddr.sin_family = AF_INET;
-    saddr.sin_port = htons(TFTP_SERVER_PORT);
-    saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin6_family = AF_INET6;
+    server_addr.sin6_port   = htons(TFTP_SERVER_PORT);
+    server_addr.sin6_addr   = in6addr_any;
 
-    sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    sock_fd = socket(AF_INET6, SOCK_DGRAM, 0);
     if (sock_fd < 0)
     {
         LOG_ERROR("socket: %s", strerror(errno));
         return -1;
     }
 
-    if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)))
+    opt = 0;
+    if (setsockopt(sock_fd, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
     {
-        LOG_ERROR("setsockopt: %s", strerror(errno));
+        LOG_ERROR("setsockopt IPV6_V6ONLY: %s", strerror(errno));
         close(sock_fd);
         return -1;
     }
 
-    if (bind(sock_fd, (s_addr *)&saddr, sa_len) < 0)
+    opt = 1;
+    if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)))
+    {
+        LOG_ERROR("setsockopt SO_REUSEADDR: %s", strerror(errno));
+        close(sock_fd);
+        return -1;
+    }
+
+    if (bind(sock_fd, (s_addr *)&server_addr, sizeof(server_addr)) < 0)
     {
         LOG_ERROR("bind: %s", strerror(errno));
         close(sock_fd);
@@ -102,26 +110,14 @@ int initiate_server()
 
 int connect_to_client(tftp_context *ctx)
 {
-    s4_addr temp_addr;
-    ctx->conn_sock = socket(AF_INET, SOCK_DGRAM, 0);
+    ctx->conn_sock = socket(ctx->addr.ss_family, SOCK_DGRAM, 0);
     if (ctx->conn_sock < 0)
     {
         LOG_ERROR("client socket: %s", strerror(errno));
         return -1;
     }
 
-    memset(&temp_addr, 0, SOCKADDR_SIZE);
-    temp_addr.sin_family = AF_INET;
-    temp_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    temp_addr.sin_port = 0;
-
-    if (bind(ctx->conn_sock, (s_addr *)&temp_addr, SOCKADDR_SIZE) < 0) {
-        LOG_ERROR("%s bind: %s", __func__, strerror(errno));
-        close(ctx->conn_sock);
-        return -1;
-    }
-
-    if (connect(ctx->conn_sock, (s_addr *)&(ctx->addr), SOCKADDR_SIZE) < 0)
+    if (connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->addr_len) < 0)
     {
         LOG_ERROR("%s connect: %s", __func__, strerror(errno));
         close(ctx->conn_sock);
@@ -312,24 +308,33 @@ void *handle_tftp_request(void *arg)
 {
     tftp_request *req = (tftp_request *)arg;
     char ip_str[INET6_ADDRSTRLEN] = {0};
-    tftp_context ctx = {0};
+    tftp_context *ctx = &(req->ctx);
+    int port = 0;
     int ret = 0;
 
-    memset(&ctx, 0, sizeof(tftp_context));
-    ctx.a_len = SOCKADDR_SIZE;
-    memcpy(&(ctx.addr), &(req->client_addr), ctx.a_len);
+    if (ctx->addr.ss_family == AF_INET)
+    {
+        struct sockaddr_in *ipv4 = (struct sockaddr_in *)&(ctx->addr);
+        inet_ntop(AF_INET, &(ipv4->sin_addr), ip_str, INET_ADDRSTRLEN);
+        port = ntohs(ipv4->sin_port);
+    }
+    else if (ctx->addr.ss_family == AF_INET6)
+    {
+        struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)&(ctx->addr);
+        inet_ntop(AF_INET6, &(ipv6->sin6_addr), ip_str, INET6_ADDRSTRLEN);
+        port = ntohs(ipv6->sin6_port);
+    }
 
-    inet_ntop(AF_INET, &(req->client_addr.sin_addr), ip_str, INET6_ADDRSTRLEN);
     LOG_RAW("_____________________________________________________________________\n");
-    LOG_INFO("Incoming request from %s %d", ip_str, ntohs(req->client_addr.sin_port));
+    LOG_INFO("Incoming request from %s %d", ip_str, port);
 
-    ret = connect_to_client(&ctx);
+    ret = connect_to_client(ctx);
     if (ret < 0)
         return NULL;
 
     if (req->data_len <= ARGS_HDR_LEN)
     {
-        send_error_packet(&ctx, EBADOP);
+        send_error_packet(ctx, EBADOP);
         goto exit_transfer;
     }
 
@@ -337,14 +342,14 @@ void *handle_tftp_request(void *arg)
 
     print_tftp_request(req->data, (size_t) req->data_len);
 
-    ctx.action = get_opcode(req->data);
-    if (ctx.action != CODE_RRQ && ctx.action != CODE_WRQ)
+    ctx->action = get_opcode(req->data);
+    if (ctx->action != CODE_RRQ && ctx->action != CODE_WRQ)
     {
-        send_error_packet(&ctx, EBADOP);
+        send_error_packet(ctx, EBADOP);
         goto exit_transfer;
     }
 
-    ret = validate_parameters(&ctx, req->data + ARGS_HDR_LEN, (size_t)req->data_len - ARGS_HDR_LEN);
+    ret = validate_parameters(ctx, req->data + ARGS_HDR_LEN, (size_t)req->data_len - ARGS_HDR_LEN);
     if (ret < 0)
     {
         goto exit_transfer;
@@ -356,26 +361,26 @@ void *handle_tftp_request(void *arg)
 
     LOG_RAW("_____________________________________________________________________\n");
 
-    if (ctx.action == CODE_RRQ)
+    if (ctx->action == CODE_RRQ)
     {
-        tftp_send_file(&ctx, false);
+        tftp_send_file(ctx, false);
     }
-    else if (ctx.action == CODE_WRQ)
+    else if (ctx->action == CODE_WRQ)
     {
-        ctx.r_block_num = 0;
-        ctx.tx_len = DATA_HDR_LEN;
-        set_opcode(ctx.tx_buf, CODE_ACK);
-        set_blocknum(ctx.tx_buf, ctx.r_block_num);
-        tftp_recv_file(&ctx, true);
+        ctx->r_block_num = 0;
+        ctx->tx_len = DATA_HDR_LEN;
+        set_opcode(ctx->tx_buf, CODE_ACK);
+        set_blocknum(ctx->tx_buf, ctx->r_block_num);
+        tftp_recv_file(ctx, true);
     }
 
 cleanup_ctx:
-    free(ctx.tx_buf);
-    free(ctx.rx_buf);
-    close(ctx.file_desc);
+    free(ctx->tx_buf);
+    free(ctx->rx_buf);
+    close(ctx->file_desc);
 exit_transfer:
+    close(ctx->conn_sock);
     free(req);
-    close(ctx.conn_sock);
     return NULL;
 }
 
@@ -383,8 +388,6 @@ int main()
 {
     int ret = 0;
     int server_sock = 0;
-    socklen_t s_len = SOCKADDR_SIZE;
-    pthread_t client_th = 0;
     tftp_request *req = NULL;
 
     ret = redirect_output();
@@ -399,7 +402,7 @@ int main()
     if (server_sock < 0)
         return EXIT_FAILURE;
 
-    LOG_INFO("Server is running");
+    LOG_INFO("TFTP Server is running on port %d (dual-stack enabled)", TFTP_SERVER_PORT);
 
     while (g_running)
     {
@@ -408,14 +411,14 @@ int main()
             req = (tftp_request *)malloc(sizeof(tftp_request));
             if (req == NULL)
             {
-                LOG_ERROR("malloc: %s", strerror(errno));
+                LOG_ERROR("%s malloc: %s", __func__, strerror(errno));
                 break;
             }
         }
 
         memset(req, 0, sizeof(tftp_request));
-
-        req->data_len = recvfrom(server_sock, req->data, REQUEST_SIZE, 0, (s_addr *)&(req->client_addr), &s_len);
+        req->ctx.addr_len = sizeof(req->ctx.addr);
+        req->data_len = recvfrom(server_sock, req->data, REQUEST_SIZE, 0, (s_addr *)&(req->ctx.addr), &(req->ctx.addr_len));
         if (req->data_len <= 0)
         {
             if (g_running)
@@ -424,13 +427,15 @@ int main()
             continue;
         }
 
-        ret = pthread_create(&client_th, NULL, handle_tftp_request, req);
+        pthread_t client_tid = 0;
+        ret = pthread_create(&client_tid, NULL, handle_tftp_request, req);
         if (ret != 0)
         {
             LOG_ERROR("pthread_create: %d", ret);
             continue;
         }
-        pthread_detach(client_th);
+
+        pthread_detach(client_tid);
         req = NULL;
     }
 
@@ -442,10 +447,9 @@ int main()
 
 /**
  *  - Use 512 bytes for sending client request not blk_size string.
+ *  - Allow configuring of TFTP server folder and port number
+ *  - Write tests to generate files and test server and client
  * 
  *  - Check for MSG_TRUNC during incoming request
- *  - Remove MAX_FILE_SIZE limit as we have blk num roll over
- *  - Use threadpools
- *  - Implement window size
- *  - Add debug mode 
+ *  - Use threadpools from HTTP project to handle requests
  */

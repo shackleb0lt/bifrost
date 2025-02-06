@@ -58,8 +58,6 @@
 #define set_opcode(buf, x)   ((uint16_t *)buf)[0] = htons((uint16_t)(x))
 #define set_blocknum(buf, x) ((uint16_t *)buf)[1] = htons((uint16_t)(x))
 
-#define SOCKADDR_SIZE sizeof(struct sockaddr_in)
-
 #define DEF_WIN_SIZE 1
 #define MAX_WIN_SIZE 65535L
 
@@ -73,7 +71,6 @@
 #define MAX_BLK_NUM 65535L
 
 #define MAX_FILE_SIZE (MAX_BLK_SIZE * MAX_BLK_NUM)
-
 
 #define PATH_LEN        500
 #define TFTP_PORT_NO    69
@@ -94,10 +91,10 @@
 #define LOG_INFO(fmt, ...) do { fprintf(stdout, "[INFO ] "fmt"\n", ##__VA_ARGS__); fflush(stdout);} while (false)
 #define LOG_RAW(fmt, ...) do { fprintf(stdout, fmt, ##__VA_ARGS__); fflush(stdout);} while (false)
 #define LOG_ERROR(fmt, ...) do { fprintf(stderr, "[ERROR] "fmt"\n", ##__VA_ARGS__); fflush(stderr);} while (false)
-// #define LOG_PKT(fmt, ...) do { fprintf(, fmt"\n", ##__VA_ARGS__); fflush(stderr);} while (false)
 
 typedef struct sockaddr s_addr;
-typedef struct sockaddr_in s4_addr;
+typedef struct sockaddr_in s_addr4;
+typedef struct sockaddr_in6 s_addr6;
 
 typedef enum
 {
@@ -145,10 +142,10 @@ typedef struct
     char *rx_buf;
 
     size_t  tx_len;
-    ssize_t rx_len; 
+    ssize_t rx_len;
 
-    s4_addr addr;
-    socklen_t a_len;
+    socklen_t addr_len;
+    struct sockaddr_storage addr;
 
     int conn_sock;
     int file_desc;

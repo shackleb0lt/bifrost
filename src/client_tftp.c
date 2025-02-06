@@ -82,13 +82,13 @@ int parse_parameters()
     {
         if (g_sess_args.local_name[g_sess_args.local_len - 1] == '/')
         {
-            fprintf(stderr, "%s: local file path is directory\n", g_sess_args.local_name);
+            LOG_ERROR("%s: local file path is directory", g_sess_args.local_name);
             return -1;
         }
 
         if (access(g_sess_args.local_name, F_OK | R_OK) != 0)
         {
-            fprintf(stderr, "access %s: %s\n", g_sess_args.local_name, strerror(errno));
+            LOG_ERROR("access %s: %s", g_sess_args.local_name, strerror(errno));
             return -1;
         }
 
@@ -108,7 +108,7 @@ int parse_parameters()
 
             if ((g_sess_args.remote_len + len) >= PATH_LEN)
             {
-                fprintf(stderr, "Destination file name %s%s is too long\n", g_sess_args.remote_name, filename);
+                LOG_ERROR("Destination file name %s%s is too long", g_sess_args.remote_name, filename);
                 return -1;
             }
             strncat(g_sess_args.remote_name, filename, len);
@@ -117,7 +117,7 @@ int parse_parameters()
 
         if (stat(g_sess_args.local_name, &st) == -1)
         {
-            fprintf(stderr, "stat %s : %s\n", g_sess_args.local_name, strerror(errno));
+            LOG_ERROR("stat %s: %s\n", g_sess_args.local_name, strerror(errno));
             return -1;
         }
 
@@ -128,7 +128,7 @@ int parse_parameters()
     {
         if (g_sess_args.remote_name[g_sess_args.remote_len - 1] == '/')
         {
-            fprintf(stderr, "%s: Remote file path is directory\n", g_sess_args.remote_name);
+            LOG_ERROR("%s: Remote file path is directory", g_sess_args.remote_name);
             return -1;
         }
 
@@ -148,7 +148,7 @@ int parse_parameters()
 
             if ((g_sess_args.local_len + len) >= PATH_MAX)
             {
-                fprintf(stderr, "Local file name %s%s will be too long\n", g_sess_args.local_name, filename);
+                LOG_ERROR("Local file name %s%s will be too long", g_sess_args.local_name, filename);
                 return -1;
             }
             strncat(g_sess_args.local_name, filename, len);
@@ -159,7 +159,7 @@ int parse_parameters()
 
     if (ctx->file_desc < 0)
     {
-        fprintf(stderr, "Unable to open local file %s: %s\n", g_sess_args.local_name, strerror(errno));
+        LOG_ERROR("Unable to open local file %s: %s", g_sess_args.local_name, strerror(errno));
         return -1;
     }
 
@@ -167,33 +167,39 @@ int parse_parameters()
 }
 
 /**
- * Convert hostname or ipv4 address from string to
+ * Convert hostname or ip address from string to
  * network form and stores in dest_addr pointer.
  */
-int parse_ip_address(const char *ip_addr, char *port_no, s4_addr *dest_addr)
+int parse_ip_address(const char *ip_addr, char *port_no, tftp_context *ctx)
 {
-    int ret = 0;
     uint16_t port = TFTP_PORT_NO;
-    static char ipstr[INET_ADDRSTRLEN] = {0};
+    s_addr4 *ipv4 = (s_addr4 *)&(ctx->addr);
+    s_addr6 *ipv6 = (s_addr6 *)&(ctx->addr);
 
     if (port_no && is_valid_portnum(port_no, &port) == false)
     {
-        fprintf(stderr, "Invalid port number received %s\n", port_no);
+        LOG_ERROR("Invalid port number received %s", port_no);
         return -1;
     }
 
-    dest_addr->sin_port = htons(port);
-    dest_addr->sin_family = AF_INET;
-
-    // Check if string is of the form "X.X.X.X"
-    ret = inet_pton(AF_INET, ip_addr, &(dest_addr->sin_addr));
-    if (ret != 1)
+    if (inet_pton(AF_INET, ip_addr, &(ipv4->sin_addr)) == 1)
     {
-        fprintf(stderr, "Invalid ipv4 address provided %s\n", ip_addr);
+        ipv4->sin_family = AF_INET;
+        ipv4->sin_port = htons(port);
+        ctx->addr_len = sizeof(s_addr4);
+    }
+    else if (inet_pton(AF_INET6, ip_addr, &(ipv6->sin6_addr)) == 1)
+    {
+        ipv6->sin6_family = AF_INET6;
+        ipv6->sin6_port = htons(port);
+        ctx->addr_len = sizeof(s_addr6);
+    }
+    else
+    {
+        LOG_ERROR("Invalid IP address provided %s", ip_addr);
         return -1;
     }
 
-    strncpy(ipstr, ip_addr, INET_ADDRSTRLEN - 1);
     return 0;
 }
 
@@ -219,7 +225,7 @@ int init_client_request(tftp_context *ctx)
     option_len = tftp_mode_to_str(ctx->mode, option);
     if (curr_len + option_len > DEF_BLK_SIZE)
     {
-        fprintf(stderr, "Remote file name is too long\n");
+        LOG_ERROR("Remote file name is too long");
         return -1;
     }
 
@@ -230,7 +236,7 @@ int init_client_request(tftp_context *ctx)
     ret = insert_options(curr_ptr, DEF_BLK_SIZE - curr_len, ctx->blk_size, ctx->file_size, ctx->win_size);
     if (ret == -1)
     {
-        fprintf(stderr, "Remote file name is too long\n");
+        LOG_ERROR("Remote file name is too long");
         return -1;
     }
 
@@ -281,7 +287,7 @@ int parse_oack_string(tftp_context *ctx)
         ctx->tx_buf = realloc(ctx->tx_buf, ctx->BUF_SIZE);
         if (ctx->tx_buf == NULL)
         {
-            fprintf(stderr, "realloc: %s\n", strerror(errno));
+            LOG_ERROR("realloc: %s", strerror(errno));
             send_error_packet(ctx, EUNDEF);
             return -1;
         }
@@ -289,7 +295,7 @@ int parse_oack_string(tftp_context *ctx)
         ctx->rx_buf = realloc(ctx->rx_buf, ctx->BUF_SIZE);
         if (ctx->rx_buf == NULL)
         {
-            fprintf(stderr, "realloc: %s\n", strerror(errno));
+            LOG_ERROR("realloc: %s", strerror(errno));
             send_error_packet(ctx, EUNDEF);
             return -1;
         }
@@ -331,21 +337,24 @@ int tftp_connect(tftp_context *ctx)
     ssize_t bytes_sent = 0;
     uint16_t block_num = 0;
     struct pollfd pfd = {0};
-    struct in_addr saved_addr = {0};
-    saved_addr.s_addr = ctx->addr.sin_addr.s_addr;
 
-    ctx->conn_sock = socket(AF_INET, SOCK_DGRAM, 0);
+    socklen_t saved_addr_len = ctx->addr_len;
+    struct sockaddr_storage saved_addr = {0};
+
+    memcpy(&saved_addr, &(ctx->addr), ctx->addr_len);
+
+    ctx->conn_sock = socket(ctx->addr.ss_family, SOCK_DGRAM, 0);
     if (ctx->conn_sock < 0)
     {
-        fprintf(stderr, "%s socket %s\n", __func__, strerror(errno));
+        LOG_ERROR("%s socket %s", __func__, strerror(errno));
         return -1;
     }
 
 send_again:
-    bytes_sent = sendto(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0, (s_addr *)&(ctx->addr), ctx->a_len);
+    bytes_sent = sendto(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0, (s_addr *)&(ctx->addr), ctx->addr_len);
     if (bytes_sent != (ssize_t)ctx->tx_len)
     {
-        fprintf(stderr, "%s sendto: %s\n", __func__, strerror(errno));
+        LOG_ERROR("%s sendto: %s", __func__, strerror(errno));
         return -1;
     }
 
@@ -357,7 +366,7 @@ recv_again:
     retries--;
     if (retries == 0)
     {
-        fprintf(stderr, "TFTP timeout\n");
+        LOG_ERROR("TFTP timeout");
         return -1;
     }
 
@@ -370,14 +379,14 @@ recv_again:
     }
     else if (ret < 0)
     {
-        fprintf(stderr, "%s poll: %s\n", __func__, strerror(errno));
+        LOG_ERROR("%s poll: %s", __func__, strerror(errno));
         return -1;
     }
 
-    ctx->rx_len = recvfrom(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0, (s_addr *)&ctx->addr, &(ctx->a_len));
+    ctx->rx_len = recvfrom(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0, (s_addr *)&ctx->addr, &(ctx->addr_len));
     if (ctx->rx_len <= 0)
     {
-        fprintf(stderr, "%s recvfrom: %s\n", __func__, strerror(errno));
+        LOG_ERROR("%s recvfrom: %s", __func__, strerror(errno));
         return -1;
     }
     else if (ctx->rx_len < DATA_HDR_LEN)
@@ -385,14 +394,11 @@ recv_again:
         LOG_ERROR("Received corrupted packet with length %ld", ctx->rx_len);
         goto recv_again;
     }
-    else if (saved_addr.s_addr != ctx->addr.sin_addr.s_addr)
+    else if (ctx->addr_len != saved_addr_len)
     {
-        fprintf(stderr, "Received response from unknown IP address\n");
-        return -1;
+        LOG_ERROR("Received response from unknown IP address");
+        goto recv_again;
     }
-#ifdef DEBUG
-    LOG_INFO("Transfer ID %d", ntohs(ctx->addr.sin_port));
-#endif
 
     code = get_opcode(ctx->rx_buf);
     block_num = get_blocknum(ctx->rx_buf);
@@ -420,10 +426,10 @@ recv_again:
     goto recv_again;
 
 connect_socket:
-    ret = connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->a_len);
+    ret = connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->addr_len);
     if (ret != 0)
     {
-        fprintf(stderr, "%s connect: %s\n", __func__, strerror(errno));
+        LOG_ERROR("%s connect: %s\n", __func__, strerror(errno));
         return -1;
     }
 
@@ -589,7 +595,7 @@ int main(int argc, char *argv[])
     if (ret)
         return EXIT_FAILURE;
 
-    ret = parse_ip_address(argv[optind], argv[optind + 1], &(ctx->addr));
+    ret = parse_ip_address(argv[optind], argv[optind + 1], ctx);
     if (ret)
     {
         free_tftp_context(ctx);

@@ -513,7 +513,6 @@ int init_tftp_context(tftp_context *ctx, TFTP_OPCODE action, size_t blk_size, si
 
     ctx->conn_sock = -1;
     ctx->file_desc = -1;
-    ctx->a_len = SOCKADDR_SIZE;
     ctx->action = action;
     ctx->BUF_SIZE = blk_size + DATA_HDR_LEN;
     ctx->blk_size = blk_size;

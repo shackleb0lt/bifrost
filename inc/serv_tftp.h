@@ -32,12 +32,12 @@
 #define TFTP_SERVER_LOG     "/tmp/bifrost.log"
 
 #define REQUEST_SIZE (DEF_BLK_SIZE + ARGS_HDR_LEN)
+
 typedef struct 
 {
     char data[REQUEST_SIZE];
     ssize_t data_len;
-
-    s4_addr client_addr;
+    tftp_context ctx;
 } tftp_request;
 
 #endif
