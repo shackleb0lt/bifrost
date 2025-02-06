@@ -24,6 +24,25 @@
 #include "serv_tftp.h"
 
 bool g_running = true;
+char g_serv_path[PATH_MAX];
+char *g_exe_name = NULL;
+
+void print_usage(char *err_str)
+{
+    if (err_str != NULL && *err_str != '\0')
+        LOG_RAW("Error: %s\n", err_str);
+
+    LOG_RAW("\nUsage:\n");
+    LOG_RAW("  %s [OPTION]\n\n", g_exe_name);
+    LOG_RAW("Options:\n");
+    LOG_RAW("  %-18s Interface address to host server on\n", "-i IP_ADDR");
+    LOG_RAW("  %-18s Port number to bind the server to\n",   "-p PORT_NO");
+    LOG_RAW("  %-18s Server root directory\n",   "-s PATH");;
+    LOG_RAW("  %-18s show usage and exit\n",     "-h");
+    LOG_RAW("Note: By default binds to port %d\n", TFTP_SERVER_PORT);
+    LOG_RAW("    : By default listens on all interfaces\n");
+    LOG_RAW("    : Default server directory is %s\n", TFTP_SERVER_PATH);
+}
 
 void handle_signal(int sig)
 {
@@ -64,18 +83,53 @@ int redirect_output()
     return 0;
 }
 
-int initiate_server()
+int initiate_server(char *ip_addr, uint16_t port, char *path)
 {
-    int sock_fd = -1;
     int opt = 0;
-    struct sockaddr_in6 server_addr = {0};
+    int sock_fd = -1;
+    socklen_t addr_len = 0;
+    struct sockaddr_storage addr = {0};
 
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin6_family = AF_INET6;
-    server_addr.sin6_port   = htons(TFTP_SERVER_PORT);
-    server_addr.sin6_addr   = in6addr_any;
+    if (realpath(path, g_serv_path) == NULL)
+    {
+        LOG_ERROR("Invalid server root %s: %s", path, strerror(errno));
+        return -1;
+    }
+    strcat(g_serv_path, "/");
+    memset(&addr, 0, sizeof(addr));
+    if (ip_addr == NULL)
+    {
+        s_addr6 *server_addr = (s_addr6 *)&addr;
+        server_addr->sin6_family = AF_INET6;
+        server_addr->sin6_port   = htons(port);
+        server_addr->sin6_addr   = in6addr_any;
+        addr_len = sizeof(s_addr6);
+    }
+    else
+    {
+        s_addr4 *ipv4 = (s_addr4 *)&addr;
+        s_addr6 *ipv6 = (s_addr6 *)&addr;
 
-    sock_fd = socket(AF_INET6, SOCK_DGRAM, 0);
+        if (inet_pton(AF_INET, ip_addr, &(ipv4->sin_addr)) == 1)
+        {
+            ipv4->sin_port = htons(port);
+            ipv4->sin_family = AF_INET;
+            addr_len = sizeof(s_addr4);
+        }
+        else if (inet_pton(AF_INET6, ip_addr, &(ipv6->sin6_addr)) == 1)
+        {
+            ipv6->sin6_port = htons(port);
+            ipv6->sin6_family = AF_INET6;
+            addr_len = sizeof(s_addr6);
+        }
+        else
+        {
+            LOG_ERROR("Invalid interface ip address %s", ip_addr);
+            return -1;
+        }
+    }
+
+    sock_fd = socket(addr.ss_family, SOCK_DGRAM, 0);
     if (sock_fd < 0)
     {
         LOG_ERROR("socket: %s", strerror(errno));
@@ -83,7 +137,8 @@ int initiate_server()
     }
 
     opt = 0;
-    if (setsockopt(sock_fd, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
+    if (addr.ss_family == AF_INET6 &&
+        setsockopt(sock_fd, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
     {
         LOG_ERROR("setsockopt IPV6_V6ONLY: %s", strerror(errno));
         close(sock_fd);
@@ -98,7 +153,7 @@ int initiate_server()
         return -1;
     }
 
-    if (bind(sock_fd, (s_addr *)&server_addr, sizeof(server_addr)) < 0)
+    if (bind(sock_fd, (s_addr *)&addr, addr_len) < 0)
     {
         LOG_ERROR("bind: %s", strerror(errno));
         close(sock_fd);
@@ -135,7 +190,7 @@ size_t parse_filename(tftp_context *ctx, char *filename)
     char fullname[PATH_MAX] = {0};
     char basename[PATH_LEN] = {0};
 
-    snprintf(temp, PATH_MAX, "%s%s", TFTP_SERVER_PATH, filename);
+    snprintf(temp, PATH_MAX, "%s%s", g_serv_path, filename);
     ptr = strrchr(temp, '/') + 1;
     if ((*ptr) == '\0')
     {
@@ -158,7 +213,7 @@ size_t parse_filename(tftp_context *ctx, char *filename)
         return 0;
     }
 
-    if (strncmp(fullname, TFTP_SERVER_PATH, strlen(TFTP_SERVER_PATH)) != 0)
+    if (strncmp(fullname, g_serv_path, strlen(g_serv_path)) != 0)
     {
         LOG_ERROR("Illegal attempt to access %s", fullname);
         send_error_packet(ctx, EACCESS);
@@ -384,26 +439,79 @@ exit_transfer:
     return NULL;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
     int ret = 0;
     int server_sock = 0;
     tftp_request *req = NULL;
 
-    ret = redirect_output();
-    if (ret < 0)
-        return EXIT_FAILURE;
+    char *ip_addr = NULL;
+    char *serv_path = TFTP_SERVER_PATH;
+    uint16_t port = TFTP_SERVER_PORT;
+
+    g_exe_name = argv[0];
 
     ret = register_sighandler(handle_signal);
     if (ret < 0)
         return EXIT_FAILURE;
+    
+    while ((ret = getopt(argc, argv, "i:p:s:h")) != -1)
+    {
+        switch (ret)
+        {
+            case 'i':
+            {
+                if (optarg == NULL || *optarg == '\0' || *optarg == '-')
+                {
+                    print_usage("IP Address not provided");
+                    return EXIT_FAILURE;
+                }
+                ip_addr = optarg;
+                break;
+            }
+            case 'p':
+            {
+                if (is_valid_portnum(optarg, &port) == false)
+                {
+                    print_usage("Invalid port number");
+                    return EXIT_FAILURE;
+                }
+                break;
+            }
+            case 's':
+            {
+                if (optarg == NULL || *optarg == '\0' || *optarg == '-')
+                {
+                    print_usage("IP Address not provided");
+                    return EXIT_FAILURE;
+                }
+                serv_path = optarg;
+                break;
+            }
+            case 'h':
+            {
+                print_usage("");
+                return EXIT_SUCCESS;
+            }
+            case '?':
+            default:
+            {
+                print_usage("");
+                return EXIT_FAILURE;
+            }
+        }
+    }
 
-    server_sock = initiate_server();
+    server_sock = initiate_server(ip_addr, port, serv_path);
     if (server_sock < 0)
         return EXIT_FAILURE;
 
-    LOG_INFO("TFTP Server is running on port %d (dual-stack enabled)", TFTP_SERVER_PORT);
+    LOG_INFO("TFTP Server is running on port %d (dual-stack enabled)", port);
 
+    ret = redirect_output();
+    if (ret < 0)
+        return EXIT_FAILURE;
+    
     while (g_running)
     {
         if (req == NULL)
