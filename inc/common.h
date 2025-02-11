@@ -164,6 +164,7 @@ typedef struct
 
     bool is_oack;
 
+    TFTP_PROGRESS prog;
     TFTP_ERRCODE err_code;
     char err_str[DEF_BLK_SIZE];
 } tftp_context;

@@ -517,6 +517,7 @@ int init_tftp_context(tftp_context *ctx, TFTP_OPCODE action, size_t blk_size, si
     ctx->BUF_SIZE = blk_size + DATA_HDR_LEN;
     ctx->blk_size = blk_size;
     ctx->win_size = w_size;
+    ctx->prog = PROG_START;
 
     ctx->tx_buf = (char *)malloc(ctx->BUF_SIZE);
     if (ctx->tx_buf == NULL)
@@ -628,9 +629,12 @@ read_next_block:
     bytes_read = s_read(ctx->file_desc, ctx->tx_buf + DATA_HDR_LEN, ctx->blk_size);
     if (bytes_read < 0)
     {
+        ctx->prog = PROG_ERROR;
         send_error_packet(ctx, EUNDEF);
         return;
     }
+
+    ctx->curr_size += (off_t)bytes_read;
 
     set_opcode(ctx->tx_buf, CODE_DATA);
     set_blocknum(ctx->tx_buf, ctx->e_block_num);
@@ -648,6 +652,7 @@ send_again:
     bytes_sent = send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
     if (bytes_sent < 0)
     {
+        ctx->prog = PROG_ERROR;
         LOG_ERROR("%s send: %s", __func__, strerror(errno));
         return;
     }
@@ -674,7 +679,8 @@ recv_again:
     retries--;
     if (retries == 0)
     {
-        LOG_ERROR("TFTP timeout\n");
+        ctx->prog = PROG_ERROR;
+        LOG_ERROR("TFTP timeout");
         return;
     }
 
@@ -687,6 +693,7 @@ recv_again:
     }
     else if (ret < 0)
     {
+        ctx->prog = PROG_ERROR;
         LOG_ERROR("%s poll: %s", __func__, strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
@@ -695,6 +702,7 @@ recv_again:
     ctx->rx_len = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
     if (ctx->rx_len < 0)
     {
+        ctx->prog = PROG_ERROR;
         LOG_ERROR("%s recv: %s", __func__, strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
@@ -709,6 +717,7 @@ recv_again:
     ctx->r_block_num = get_blocknum(ctx->rx_buf);
     if (code == CODE_ERROR)
     {
+        ctx->prog = PROG_ERROR;
         handle_error_packet(ctx->rx_buf, ctx->rx_len);
         return;
     }
@@ -717,9 +726,11 @@ recv_again:
 #ifdef PACKET_DEBUG
         LOG_INFO("Received ACK %lu", ctx->r_block_num);
 #endif
-        ctx->curr_size += (off_t)bytes_read;
         if (is_done)
+        {
+            ctx->prog = PROG_FINISH;
             return;
+        }
         goto read_next_block;
     }
 #ifdef DEBUG
@@ -766,6 +777,7 @@ write_next_block:
     bytes_written = s_write(ctx->file_desc, ctx->rx_buf + DATA_HDR_LEN, bytes_recv);
     if ((size_t)bytes_written != bytes_recv)
     {
+        ctx->prog = PROG_ERROR;
         send_error_packet(ctx, ENOSPACE);
         return;
     }
@@ -794,6 +806,7 @@ send_again:
     bytes_sent = send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
     if (bytes_sent < 0)
     {
+        ctx->prog = PROG_ERROR;
         LOG_ERROR("%s send: %s", __func__, strerror(errno));
         return;
     }
@@ -805,7 +818,10 @@ send_again:
 #endif
 
     if (is_done)
+    {
+        ctx->prog = PROG_FINISH;
         return;
+    }
 
 recv_again:
     pfd.fd = ctx->conn_sock;
@@ -814,7 +830,8 @@ recv_again:
 
     if (retries == 0)
     {
-        LOG_ERROR("TFTP timeout\n");
+        ctx->prog = PROG_ERROR;
+        LOG_ERROR("TFTP timeout");
         return;
     }
 
@@ -828,6 +845,7 @@ recv_again:
     }
     else if (ret < 0)
     {
+        ctx->prog = PROG_ERROR;
         LOG_ERROR("%s poll: %s", __func__, strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
@@ -836,6 +854,7 @@ recv_again:
     ctx->rx_len = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
     if (ctx->rx_len < 0)
     {
+        ctx->prog = PROG_ERROR;
         LOG_ERROR("%s recv: %s", __func__, strerror(errno));
         send_error_packet(ctx, EUNDEF);
         return;
@@ -851,6 +870,7 @@ recv_again:
     ctx->r_block_num = get_blocknum(ctx->rx_buf);
     if (code == CODE_ERROR)
     {
+        ctx->prog = PROG_ERROR;
         handle_error_packet(ctx->rx_buf, ctx->rx_len);
         return;
     }

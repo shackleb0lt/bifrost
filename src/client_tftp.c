@@ -66,6 +66,50 @@ void handle_signal(int sig)
 }
 
 /**
+ * 
+ */
+void *progress_bar(void * arg)
+{
+    tftp_context *ctx = (tftp_context *)arg;
+
+    char p_bar[PROG_BAR_LEN + 1] = {0};    
+    off_t p_size = 0;
+    off_t p_per = 0;
+    off_t c_per = 0;
+    off_t index = 0;
+
+    memset(p_bar, ' ', PROG_BAR_LEN);
+    while (ctx->prog == PROG_START)
+    {
+        c_per = (100 * ctx->curr_size) / ctx->file_size;
+        index = PROG_BAR_LEN * c_per / 100;
+        
+        if (c_per > p_per || ctx->curr_size > p_size + UPDATE_DIFF)
+        {
+            memset(p_bar, '=', (size_t) index);
+            printf("\r[%s] %ld%% (%ld) bytes", p_bar, c_per, ctx->curr_size);
+            fflush(stdout);
+            p_per = c_per;
+            p_size = ctx->curr_size;
+        }
+        usleep(1000);
+    }
+
+    if (ctx->prog == PROG_FINISH)
+    {
+        c_per = (100 * ctx->curr_size) / ctx->file_size;
+        index = PROG_BAR_LEN * c_per / 100;        
+        memset(p_bar, '=', (size_t) index);
+        printf("\r[%s] %ld%% (%ld) bytes", p_bar, c_per, ctx->curr_size);
+        fflush(stdout);
+    }
+
+    printf("\n");
+    fflush(stdout);
+    return NULL;
+}
+
+/**
  * Parses the local and file names for validity
  * Autocompletes the destination path if it's a directory
  * by using the filename of source path.
@@ -117,7 +161,7 @@ int parse_parameters()
 
         if (stat(g_sess_args.local_name, &st) == -1)
         {
-            LOG_ERROR("stat %s: %s\n", g_sess_args.local_name, strerror(errno));
+            LOG_ERROR("stat %s: %s", g_sess_args.local_name, strerror(errno));
             return -1;
         }
 
@@ -256,6 +300,7 @@ int init_client_request(tftp_context *ctx)
 int parse_oack_string(tftp_context *ctx)
 {
     int ret = 0;
+    pthread_t prog_t;
     size_t *blk_size = NULL;
     size_t *win_size = NULL;
     off_t *file_size = NULL;
@@ -304,6 +349,20 @@ int parse_oack_string(tftp_context *ctx)
         memset(ctx->rx_buf, 0, ctx->BUF_SIZE);
     }
 
+    if (ctx->file_size <= 0)
+        is_prog_bar = false;
+
+
+    if (is_prog_bar)
+    {
+        ret = pthread_create(&prog_t, NULL, progress_bar, ctx);
+        if (ret != 0)
+        {
+            is_prog_bar = false;
+            LOG_ERROR("pthread_create: %d", ret);
+        }
+    }
+
     if (ctx->action == CODE_RRQ)
     {
         ctx->r_block_num = 0;
@@ -316,6 +375,9 @@ int parse_oack_string(tftp_context *ctx)
     {
         tftp_send_file(ctx, false);
     }
+
+    if (is_prog_bar)
+        pthread_join(prog_t, NULL);
 
     return 0;
 }
@@ -419,7 +481,7 @@ connect_socket:
     ret = connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->addr_len);
     if (ret != 0)
     {
-        LOG_ERROR("%s connect: %s\n", __func__, strerror(errno));
+        LOG_ERROR("%s connect: %s", __func__, strerror(errno));
         return -1;
     }
 

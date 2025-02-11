@@ -383,6 +383,8 @@ void *handle_tftp_request(void *arg)
     LOG_RAW("_____________________________________________________________________\n");
     LOG_INFO("Incoming request from %s %d", ip_str, port);
 
+    ctx->prog = PROG_START;
+
     ret = connect_to_client(ctx);
     if (ret < 0)
         return NULL;
@@ -552,12 +554,3 @@ int main(int argc, char *argv[])
 
     return EXIT_SUCCESS;
 }
-
-/**
- *  - Use 512 bytes for sending client request not blk_size string.
- *  - Allow configuring of TFTP server folder and port number
- *  - Write tests to generate files and test server and client
- * 
- *  - Check for MSG_TRUNC during incoming request
- *  - Use threadpools from HTTP project to handle requests
- */
