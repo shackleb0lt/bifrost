@@ -36,20 +36,10 @@ debug: CFLAGS += $(DEBUG_FLAGS)
 debug: LDFLAGS += $(LDLIBS)
 debug: $(SERVER_TARGET) $(CLIENT_TARGET)
 
-debug_clang: CC := clang-16
-debug_clang: CFLAGS += $(DEBUG_FLAGS)
-debug_clang: LDFLAGS += $(LDLIBS)
-debug_clang: $(SERVER_TARGET) $(CLIENT_TARGET)
-
 release: CC := gcc
 release: CFLAGS += $(RELEASE_FLAGS)
 release: LDFLAGS += $(RELEASE_LDFLAGS) $(LDLIBS)
 release: $(SERVER_TARGET) $(CLIENT_TARGET)
-
-release_clang: CC := clang-16
-release_clang: CFLAGS += $(RELEASE_FLAGS)
-release_clang: LDFLAGS += $(RELEASE_LDFLAGS) $(LDLIBS)
-release_clang: $(SERVER_TARGET) $(CLIENT_TARGET)
 
 # Build executable SERVER_TARGET
 $(SERVER_TARGET): $(SRC_OBJECTS)

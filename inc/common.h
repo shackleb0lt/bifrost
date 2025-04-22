@@ -61,7 +61,7 @@
 #define DEF_WIN_SIZE 1
 #define MAX_WIN_SIZE 65535L
 
-#define MIN_PORT_NUM 0  
+#define MIN_PORT_NUM 0
 #define MAX_PORT_NUM 65535
 
 #define MIN_BLK_SIZE 8
@@ -70,7 +70,9 @@
 
 #define MAX_BLK_NUM 65535L
 
-#define MAX_FILE_SIZE (MAX_BLK_SIZE * MAX_BLK_NUM)
+#define PKT_BUFFER_SIZE  (DATA_HDR_LEN + MAX_BLK_SIZE)
+#define MAX_FILE_SIZE    (MAX_BLK_SIZE * MAX_BLK_NUM)
+#define REQUEST_SIZE     (DEF_BLK_SIZE + DATA_HDR_LEN)
 
 #define PATH_LEN        500
 #define TFTP_PORT_NO    69
@@ -127,48 +129,6 @@ typedef enum
     MODE_MAIL = 2,
 } TFTP_MODE;
 
-typedef enum 
-{
-    PROG_START = 0,
-    PROG_UPDATE = 1,
-    PROG_FINISH = 2,
-    PROG_ERROR = 3,
-} TFTP_PROGRESS;
-
-typedef struct
-{
-    size_t BUF_SIZE;
-    char *tx_buf;
-    char *rx_buf;
-
-    size_t  tx_len;
-    ssize_t rx_len;
-
-    socklen_t addr_len;
-    struct sockaddr_storage addr;
-
-    int conn_sock;
-    int file_desc;
-
-    off_t file_size;
-    off_t curr_size;
-
-    size_t e_block_num;
-    size_t r_block_num;
-
-    size_t blk_size;
-    size_t win_size;
-
-    TFTP_MODE mode;
-    TFTP_OPCODE action;
-
-    bool is_oack;
-
-    TFTP_PROGRESS prog;
-    TFTP_ERRCODE err_code;
-    char err_str[DEF_BLK_SIZE];
-} tftp_context;
-
 int register_sighandler(void (*handler_func)(int));
 
 bool is_valid_blocksize(const char *size, size_t *block_size);
@@ -179,18 +139,17 @@ size_t tftp_mode_to_str(TFTP_MODE mode, char mode_str[]);
 const char *tftp_opcode_to_str(TFTP_OPCODE opcode);
 const char *tftp_err_to_str(TFTP_ERRCODE err_code);
 
-void print_tftp_request(char * buf, size_t len);
+void print_tftp_request(char *buf, size_t len);
 
-void handle_error_packet(char *buf, ssize_t buf_len);
-void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code);
+ssize_t file_read(int fd, void *buf, size_t buf_size, size_t abs_blk_num);
+ssize_t file_write(int fd, const void *buf, size_t count);
+ssize_t safe_recv(int fd, void *buf, size_t buf_size, int timeout);
 
-int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size, size_t win_size);
+void handle_error_packet(char rx_buf[], ssize_t buf_len);
+void send_error_packet(int conn_sock, char *err_str, TFTP_ERRCODE err_code);
+
+size_t tftp_rollover_blocknumber(size_t block_number, size_t prev_block_number);
+size_t insert_options(char buf[], size_t blk_size, off_t file_size, size_t win_size);
 int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_size, size_t *win_size);
-
-int init_tftp_context(tftp_context * ctx, TFTP_OPCODE action, size_t b_size, size_t w_size);
-void free_tftp_context(tftp_context * ctx);
-
-void tftp_send_file(tftp_context *ctx, bool send_first);
-void tftp_recv_file(tftp_context *ctx, bool send_first);
 
 #endif

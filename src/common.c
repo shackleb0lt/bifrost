@@ -256,19 +256,17 @@ char *get_option_val(const char *opt, char oack_str[], size_t len)
  *
  * @return 0 on success, -1 if buffer is insufficient
  */
-int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size, size_t win_size)
+size_t insert_options(char buf[], size_t blk_size, off_t file_size, size_t win_size)
 {
     size_t op_len = 0;
     size_t curr_len = 0;
-    char option[32] = {0};
+    char option[64] = {0};
     char *curr_ptr = buf;
 
     if (blk_size != DEF_BLK_SIZE)
     {
-        op_len = (size_t)snprintf(option, 32, "%lu", blk_size);
+        op_len = (size_t)snprintf(option, 64, "%lu", blk_size);
         curr_len += BLKSIZE_OPLEN + op_len + 2;
-        if (curr_len > buf_len)
-            return -1;
 
         strcpy(curr_ptr, BLKSIZE_OP);
         curr_ptr += BLKSIZE_OPLEN + 1;
@@ -278,10 +276,8 @@ int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size,
 
     if (file_size != -1)
     {
-        op_len = (size_t)snprintf(option, 32, "%lu", file_size);
+        op_len = (size_t)snprintf(option, 64, "%lu", file_size);
         curr_len += TSIZE_OPLEN + op_len + 2;
-        if (curr_len > buf_len)
-            return -1;
 
         strcpy(curr_ptr, TSIZE_OP);
         curr_ptr += TSIZE_OPLEN + 1;
@@ -291,10 +287,8 @@ int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size,
 
     if (win_size != DEF_WIN_SIZE)
     {
-        op_len = (size_t)snprintf(option, 32, "%lu", win_size);
+        op_len = (size_t)snprintf(option, 64, "%lu", win_size);
         curr_len += WINSIZE_OPLEN + op_len + 2;
-        if (curr_len > buf_len)
-            return -1;
 
         strcpy(curr_ptr, WINSIZE_OP);
         curr_ptr += WINSIZE_OPLEN + 1;
@@ -302,7 +296,7 @@ int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size,
         curr_ptr += op_len + 1;
     }
 
-    return (int)curr_len;
+    return curr_len;
 }
 
 /**
@@ -310,28 +304,24 @@ int insert_options(char buf[], size_t buf_len, size_t blk_size, off_t file_size,
  * Validate the options and store in the pointers
  * @return 0 if extracted parameters are valid, -1 on failure
  */
-int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_size, size_t *win_size)
+int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *t_size, size_t *win_size)
 {
     char *val = NULL;
 
     if (blk_size)
     {
         val = get_option_val(BLKSIZE_OP, buf, buf_len);
-        if (val == NULL)
-        {
-            *blk_size = DEF_BLK_SIZE;
-        }
-        else if (is_valid_blocksize(val, blk_size) == false)
+        if (val && is_valid_blocksize(val, blk_size) == false)
         {
             LOG_ERROR("%s: Received invalid block size %s", __func__, val);
             return -1;
         }
     }
 
-    if (file_size)
+    if (t_size)
     {
         val = get_option_val(TSIZE_OP, buf, buf_len);
-        if (val && is_valid_filesize(val, file_size) == false)
+        if (val && is_valid_filesize(val, t_size) == false)
         {
             LOG_ERROR("%s: Received invalid file size %s", __func__, val);
             return -1;
@@ -341,11 +331,7 @@ int extract_options(char buf[], size_t buf_len, size_t *blk_size, off_t *file_si
     if (win_size)
     {
         val = get_option_val(WINSIZE_OP, buf, buf_len);
-        if (val == NULL)
-        {
-            *win_size = DEF_WIN_SIZE;
-        }
-        else if (is_valid_windowsize(val, win_size) == false)
+        if (val && is_valid_windowsize(val, win_size) == false)
         {
             LOG_ERROR("%s: Received invalid window size %s", __func__, val);
             return -1;
@@ -419,7 +405,7 @@ void print_tftp_request(char *buf, size_t len)
  * Parses the received packet to extract error code
  * and error message if any sent by the server.
  */
-void handle_error_packet(char *rx_buf, ssize_t b_recv)
+void handle_error_packet(char rx_buf[], ssize_t b_recv)
 {
     TFTP_ERRCODE err_code = get_blocknum(rx_buf);
     rx_buf += DATA_HDR_LEN;
@@ -437,32 +423,49 @@ void handle_error_packet(char *rx_buf, ssize_t b_recv)
 }
 
 /**
- * Securely reads data upto 'count' bytes from a file descriptor into 'buf'
+ * 
+ */
+size_t tftp_rollover_blocknumber(size_t block_number, size_t prev_block_number)
+{
+    unsigned short b = (unsigned short)block_number;
+    unsigned short pb = (unsigned short)prev_block_number;
+    long result = b | (prev_block_number & ~0xFFFF);
+    if (b < 0x4000 && pb > 0xC000)
+    result += 0x10000;
+    else if (b > 0xC000 && pb < 0x4000 && (prev_block_number & ~0xFFFF))
+    result -= 0x10000;
+    return result;
+}
+
+/**
+ * Securely reads data upto 'buf_size' bytes atan offset calulated
+ * from absolute blocksize, into 'buf'. Using the file descriptor fd.
  * Returns the length of data actually read or -1 in case or error
  */
-ssize_t s_read(int fd, void *buf, size_t count)
+ssize_t file_read(int fd, void *buf, size_t buf_size, size_t abs_blk_num)
 {
-    ssize_t total_read = 0;
     char *ptr = buf;
+    ssize_t total_read = 0, bytes_read = 0;
+    off_t offset = ((off_t) abs_blk_num - 1) * (off_t) buf_size;
 
-    while (count > 0)
+    while (buf_size > 0)
     {
-        ssize_t bytes_read = read(fd, ptr, count);
-
+        bytes_read = pread(fd, ptr, buf_size, offset);
         if (bytes_read < 0)
         {
             if (errno == EINTR)
                 continue;
-
-            LOG_ERROR("read: %s", strerror(errno));
+            
+            LOG_ERROR("pread: %s", strerror(errno));
             return -1;
         }
 
         if (bytes_read == 0)
             break;
-
+        
         ptr += bytes_read;
-        count -= (size_t)bytes_read;
+        offset += bytes_read;
+        buf_size -= (size_t) bytes_read;
         total_read += bytes_read;
     }
 
@@ -473,7 +476,7 @@ ssize_t s_read(int fd, void *buf, size_t count)
  * Securely write data upto 'count' bytes to a file descriptor from 'buf'
  * Returns the length of data actually written or -1 in case or error
  */
-ssize_t s_write(int fd, const void *buf, size_t count)
+ssize_t file_write(int fd, const void *buf, size_t count)
 {
     ssize_t total_written = 0;
     const char *ptr = buf;
@@ -503,74 +506,43 @@ ssize_t s_write(int fd, const void *buf, size_t count)
 }
 
 /**
- * Initialises tftp_context struct, with passed values
- *
- * Note: Only used by client program at the moment
+ * 
  */
-int init_tftp_context(tftp_context *ctx, TFTP_OPCODE action, size_t blk_size, size_t w_size)
+ssize_t safe_recv(int fd, void *buf, size_t buf_size, int timeout)
 {
-    memset(ctx, 0, sizeof(tftp_context));
+    struct pollfd pfd = {0};
+    int poll_ret = 0;
+	ssize_t bytes_recv = 0;
 
-    ctx->conn_sock = -1;
-    ctx->file_desc = -1;
-    ctx->action = action;
-    ctx->BUF_SIZE = blk_size + DATA_HDR_LEN;
-    ctx->blk_size = blk_size;
-    ctx->win_size = w_size;
-    ctx->prog = PROG_START;
-
-    ctx->tx_buf = (char *)malloc(ctx->BUF_SIZE);
-    if (ctx->tx_buf == NULL)
+	while (1)
     {
-        LOG_ERROR("%s: malloc tx_buf: %s", __func__, strerror(errno));
+        pfd.fd = fd;
+        pfd.events = POLLIN;
+        poll_ret = poll(&pfd, 1, timeout);
+        if (poll_ret == 0)
+            return 0;
+        else if (poll_ret > 0)
+            break;
+        else if (poll_ret < 0 && errno != EINTR)
+        {
+            LOG_ERROR("%s poll: %s", __func__, strerror(errno));
+            return -1;
+        }
+	}
+
+    bytes_recv = recv(fd, buf, buf_size, 0);
+    if (bytes_recv < 0)
+    {
+        LOG_ERROR("%s recv: %s", __func__, strerror(errno));
+        return -1;
+    }
+    else if (bytes_recv < DATA_HDR_LEN)
+    {
+        LOG_ERROR("%s: Received packet is too small (%ld bytes)", __func__, bytes_recv);
         return -1;
     }
 
-    ctx->rx_buf = (char *)malloc(ctx->BUF_SIZE);
-    if (ctx->rx_buf == NULL)
-    {
-        LOG_ERROR("%s: malloc rx_buf: %s", __func__, strerror(errno));
-        free(ctx->tx_buf);
-        ctx->tx_buf = NULL;
-        return -1;
-    }
-
-    memset(ctx->tx_buf, 0, ctx->BUF_SIZE);
-    memset(ctx->rx_buf, 0, ctx->BUF_SIZE);
-
-    return 0;
-}
-
-/**
- * Performs cleanup on tftp context, by closing open
- * sockets and file descriptor, also releases dynamically
- * allocated memory if any
- */
-void free_tftp_context(tftp_context *ctx)
-{
-    if (ctx->tx_buf)
-    {
-        free(ctx->tx_buf);
-        ctx->tx_buf = NULL;
-    }
-
-    if (ctx->rx_buf)
-    {
-        free(ctx->rx_buf);
-        ctx->rx_buf = NULL;
-    }
-
-    if (ctx->conn_sock >= 0)
-    {
-        close(ctx->conn_sock);
-        ctx->conn_sock = -1;
-    }
-
-    if (ctx->file_desc >= 0)
-    {
-        close(ctx->file_desc);
-        ctx->file_desc = -1;
-    }
+	return bytes_recv;
 }
 
 /**
@@ -579,7 +551,7 @@ void free_tftp_context(tftp_context *ctx)
  * This packet is sent to the server/client
  * indicating an error occurred and stop transfer
  */
-void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code)
+void send_error_packet(int conn_sock, char *err_str, TFTP_ERRCODE err_code)
 {
     size_t len = 0;
     char buf[DATA_HDR_LEN + DEF_BLK_SIZE] = {0};
@@ -587,304 +559,10 @@ void send_error_packet(tftp_context *ctx, TFTP_ERRCODE err_code)
     set_opcode(buf, CODE_ERROR);
     set_blocknum(buf, err_code);
     len += DATA_HDR_LEN;
-    if (ctx->err_str[0] == '\0')
+    if (err_str == NULL)
         len += (size_t)snprintf(buf + DATA_HDR_LEN, DEF_BLK_SIZE, "%s", tftp_err_to_str(err_code));
     else
-        len += (size_t)snprintf(buf + DATA_HDR_LEN, DEF_BLK_SIZE, "%s", ctx->err_str);
+        len += (size_t)snprintf(buf + DATA_HDR_LEN, DEF_BLK_SIZE, "%s", err_str);
 
-    send(ctx->conn_sock, buf, len, 0);
-}
-
-/**
- * Common function used by client and server to send a file
- */
-void tftp_send_file(tftp_context *ctx, bool send_first)
-{
-    int ret = 0;
-    bool is_done = false;
-
-    size_t win_blk_num = 0;
-    ssize_t bytes_read = 0;
-    ssize_t bytes_sent = 0;
-    struct pollfd pfd = {0};
-
-    int retries = TFTP_NUM_RETRIES;
-    int wait_time = TFTP_TIMEOUT_MS;
-
-    TFTP_OPCODE code = CODE_UNDEF;
-
-    ctx->e_block_num = 0;
-    ctx->r_block_num = 0;
-
-    if (send_first)
-    {
-        goto send_again;
-    }
-
-read_next_block:
-    ctx->e_block_num++;
-    if (ctx->e_block_num > MAX_BLK_NUM)
-        ctx->e_block_num = 0;
-
-    bytes_read = s_read(ctx->file_desc, ctx->tx_buf + DATA_HDR_LEN, ctx->blk_size);
-    if (bytes_read < 0)
-    {
-        ctx->prog = PROG_ERROR;
-        send_error_packet(ctx, EUNDEF);
-        return;
-    }
-
-    ctx->curr_size += (off_t)bytes_read;
-
-    set_opcode(ctx->tx_buf, CODE_DATA);
-    set_blocknum(ctx->tx_buf, ctx->e_block_num);
-
-    ctx->tx_len = (size_t)bytes_read + DATA_HDR_LEN;
-    if (ctx->tx_len < ctx->BUF_SIZE)
-        is_done = true;
-
-    win_blk_num++;
-
-    retries = TFTP_NUM_RETRIES;
-    wait_time = TFTP_TIMEOUT_MS;
-
-send_again:
-    bytes_sent = send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
-    if (bytes_sent < 0)
-    {
-        ctx->prog = PROG_ERROR;
-        LOG_ERROR("%s send: %s", __func__, strerror(errno));
-        return;
-    }
-
-#ifdef PACKET_DEBUG
-    if (get_opcode(ctx->tx_buf) == CODE_DATA)
-        LOG_INFO("Sent DATA %lu size %ld", ctx->e_block_num, ctx->tx_len - DATA_HDR_LEN);
-    else
-        LOG_INFO("Sent %s", tftp_opcode_to_str(get_opcode(ctx->tx_buf)));
-#endif
-    if (win_blk_num >= ctx->win_size || is_done || send_first)
-    {
-        send_first = false;
-        win_blk_num = 0;
-        goto recv_again;
-    }
-    goto read_next_block;
-
-recv_again:
-    pfd.fd = ctx->conn_sock;
-    pfd.events = POLLIN;
-    ret = poll(&pfd, 1, wait_time);
-
-    retries--;
-    if (retries == 0)
-    {
-        ctx->prog = PROG_ERROR;
-        LOG_ERROR("TFTP timeout");
-        return;
-    }
-
-    if (ret == 0)
-    {
-        wait_time += (wait_time >> 1);
-        if (wait_time > TFTP_MAXTIMEOUT_MS)
-            wait_time = TFTP_MAXTIMEOUT_MS;
-        goto send_again;
-    }
-    else if (ret < 0)
-    {
-        ctx->prog = PROG_ERROR;
-        LOG_ERROR("%s poll: %s", __func__, strerror(errno));
-        send_error_packet(ctx, EUNDEF);
-        return;
-    }
-
-    ctx->rx_len = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
-    if (ctx->rx_len < 0)
-    {
-        ctx->prog = PROG_ERROR;
-        LOG_ERROR("%s recv: %s", __func__, strerror(errno));
-        send_error_packet(ctx, EUNDEF);
-        return;
-    }
-    else if (ctx->rx_len < DATA_HDR_LEN)
-    {
-        LOG_ERROR("%s: Received corrupted packet with length %ld", __func__, ctx->rx_len);
-        goto recv_again;
-    }
-
-    code = get_opcode(ctx->rx_buf);
-    ctx->r_block_num = get_blocknum(ctx->rx_buf);
-    if (code == CODE_ERROR)
-    {
-        ctx->prog = PROG_ERROR;
-        handle_error_packet(ctx->rx_buf, ctx->rx_len);
-        return;
-    }
-    else if (code == CODE_ACK && ctx->r_block_num == ctx->e_block_num)
-    {
-#ifdef PACKET_DEBUG
-        LOG_INFO("Received ACK %lu", ctx->r_block_num);
-#endif
-        if (is_done)
-        {
-            ctx->prog = PROG_FINISH;
-            return;
-        }
-        goto read_next_block;
-    }
-#ifdef DEBUG
-    LOG_ERROR("%s: Received unexpected packet %s %lu", __func__, tftp_opcode_to_str(code), ctx->r_block_num);
-    LOG_ERROR("%s: Expected packet %s %lu", __func__, tftp_opcode_to_str(CODE_ACK), ctx->e_block_num);
-#endif
-    goto recv_again;
-}
-
-/**
- * Common function used by client and server to receive a file
- */
-void tftp_recv_file(tftp_context *ctx, bool send_first)
-{
-    int ret = 0;
-    bool is_done = false;
-
-    size_t win_blk_num = 0;
-    ssize_t bytes_written = 0;
-    size_t bytes_recv = 0;
-    ssize_t bytes_sent = 0;
-    struct pollfd pfd = {0};
-
-    TFTP_OPCODE code = CODE_UNDEF;
-
-    int retries = TFTP_NUM_RETRIES;
-    int wait_time = TFTP_TIMEOUT_MS;
-
-    ctx->e_block_num = 1;
-
-    if (send_first)
-    {
-        goto send_again;
-    }
-
-    ctx->r_block_num = 1;
-    ctx->tx_len = DATA_HDR_LEN;
-
-write_next_block:
-    bytes_recv = (size_t)ctx->rx_len - DATA_HDR_LEN;
-    if (bytes_recv < ctx->blk_size)
-        is_done = true;
-
-    bytes_written = s_write(ctx->file_desc, ctx->rx_buf + DATA_HDR_LEN, bytes_recv);
-    if ((size_t)bytes_written != bytes_recv)
-    {
-        ctx->prog = PROG_ERROR;
-        send_error_packet(ctx, ENOSPACE);
-        return;
-    }
-    ctx->curr_size += (off_t)bytes_written;
-
-    ctx->e_block_num++;
-    if (ctx->e_block_num > MAX_BLK_NUM)
-        ctx->e_block_num = 0;
-
-    set_opcode(ctx->tx_buf, CODE_ACK);
-    set_blocknum(ctx->tx_buf, ctx->r_block_num);
-
-    retries = TFTP_NUM_RETRIES;
-    wait_time = TFTP_TIMEOUT_MS;
-
-    win_blk_num++;
-
-    if (win_blk_num >= ctx->win_size || is_done == true)
-    {
-        win_blk_num = 0;
-        goto send_again;
-    }
-    goto recv_again;
-
-send_again:
-    bytes_sent = send(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0);
-    if (bytes_sent < 0)
-    {
-        ctx->prog = PROG_ERROR;
-        LOG_ERROR("%s send: %s", __func__, strerror(errno));
-        return;
-    }
-#ifdef PACKET_DEBUG
-    if (get_opcode(ctx->tx_buf) == CODE_ACK)
-        LOG_INFO("Sent ACK %lu", ctx->r_block_num);
-    else
-        LOG_INFO("Sent %s", tftp_opcode_to_str(get_opcode(ctx->tx_buf)));
-#endif
-
-    if (is_done)
-    {
-        ctx->prog = PROG_FINISH;
-        return;
-    }
-
-recv_again:
-    pfd.fd = ctx->conn_sock;
-    pfd.events = POLLIN;
-    ret = poll(&pfd, 1, wait_time);
-
-    if (retries == 0)
-    {
-        ctx->prog = PROG_ERROR;
-        LOG_ERROR("TFTP timeout");
-        return;
-    }
-
-    if (ret == 0)
-    {
-        retries--;
-        wait_time += (wait_time >> 1);
-        if (wait_time > TFTP_MAXTIMEOUT_MS)
-            wait_time = TFTP_MAXTIMEOUT_MS;
-        goto send_again;
-    }
-    else if (ret < 0)
-    {
-        ctx->prog = PROG_ERROR;
-        LOG_ERROR("%s poll: %s", __func__, strerror(errno));
-        send_error_packet(ctx, EUNDEF);
-        return;
-    }
-
-    ctx->rx_len = recv(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0);
-    if (ctx->rx_len < 0)
-    {
-        ctx->prog = PROG_ERROR;
-        LOG_ERROR("%s recv: %s", __func__, strerror(errno));
-        send_error_packet(ctx, EUNDEF);
-        return;
-    }
-    else if (ctx->rx_len < DATA_HDR_LEN)
-    {
-        retries--;
-        LOG_ERROR("%s: Received corrupted packet with length %ld", __func__, ctx->rx_len);
-        goto recv_again;
-    }
-
-    code = get_opcode(ctx->rx_buf);
-    ctx->r_block_num = get_blocknum(ctx->rx_buf);
-    if (code == CODE_ERROR)
-    {
-        ctx->prog = PROG_ERROR;
-        handle_error_packet(ctx->rx_buf, ctx->rx_len);
-        return;
-    }
-    else if (code == CODE_DATA && ctx->r_block_num == ctx->e_block_num)
-    {
-#ifdef PACKET_DEBUG
-        LOG_INFO("Received DATA %lu size %ld", ctx->r_block_num, ctx->rx_len - DATA_HDR_LEN);
-#endif
-        goto write_next_block;
-    }
-
-#ifdef DEBUG
-    LOG_ERROR("%s: Received unexpected packet %s %lu", __func__, tftp_opcode_to_str(code), ctx->r_block_num);
-    LOG_ERROR("%s: Expected packet %s %lu", __func__, tftp_opcode_to_str(CODE_DATA), ctx->e_block_num);
-#endif
-    goto recv_again;
+    send(conn_sock, buf, len, 0);
 }

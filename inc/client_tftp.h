@@ -25,23 +25,58 @@
 #define CLIENT_TFTP_H
 
 #include "common.h"
-#include <pthread.h>
 
 // #define TIMER_ON 1
 #define PROG_BAR_LEN    64
 #define UPDATE_DIFF     1024 * 128
 #define OPTION_LEN      32
 
-typedef struct
+typedef enum
 {
+    ERROR_STATE = 0,
+    SEND_REQ,
+    RRQ_SENT,
+    WRQ_SENT,
+    SEND_OACK,
+    RECV_ACK,
+    RECV_DATA,
+    SEND_ACK,
+    SEND_DATA,
+    WAIT_PKT,
+} TFTP_CLIENT_STATE;
+
+typedef struct 
+{
+    char tx_buf[PKT_BUFFER_SIZE];
+    char rx_buf[PKT_BUFFER_SIZE];
+
     char local_name[PATH_MAX];
     char remote_name[PATH_LEN];
-
-    tftp_context tftp_ctx;
 
     size_t local_len;
     size_t remote_len;
 
-} tftp_client;
+    socklen_t addr_len;
+    struct sockaddr_storage addr;
+
+    size_t BUF_SIZE;
+    size_t tx_len;
+    size_t rx_len;
+
+    size_t blk_size;
+    size_t win_size;
+
+    int conn_sock;
+    int file_desc;
+
+    off_t file_size;
+    off_t curr_size;
+
+    bool is_oack;
+    bool is_tsize_off;
+
+    TFTP_OPCODE type;
+    TFTP_CLIENT_STATE state;
+} tftp_request;
 
 #endif

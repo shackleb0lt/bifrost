@@ -25,7 +25,6 @@
 
 bool is_prog_bar = true;
 char *g_exe_name = NULL;
-tftp_client g_sess_args;
 
 /**
  * Prints the usage of the tftp client binary
@@ -44,9 +43,10 @@ void print_usage(char *err_str)
     printf("  %-18s Remote file path\n",    "-r FILE");
     printf("  %-18s Transfer block size 8 - 65464\n", "-b SIZE");
     printf("  %-18s Transfer window size 1 - 65536\n", "-w COUNT");
+    printf("  %-18s Do not give transfer size\n", "-t");
     printf("  %-18s Do not display progress bar\n", "-q");
     printf("  %-18s show usage and exit\n", "-h");
-    printf("Note: Option -p or -g is mandatory, and they are mutually exclusive\n");
+    printf("Note: Option -p or -g is mandatory, and are mutually exclusive\n");
     printf("    : Option -l and -r are both mandatory\n");
     printf("    : Default block size is 512 bytes\n");
     printf("    : Default window size is 1 (RFC 7440)\n");
@@ -67,7 +67,6 @@ void handle_signal(int sig)
 
 /**
  * 
- */
 void *progress_bar(void * arg)
 {
     tftp_context *ctx = (tftp_context *)arg;
@@ -108,6 +107,7 @@ void *progress_bar(void * arg)
     fflush(stdout);
     return NULL;
 }
+ */
 
 /**
  * Parses the local and file names for validity
@@ -115,30 +115,29 @@ void *progress_bar(void * arg)
  * by using the filename of source path.
  * Also opens the local file and saves the descriptor
  */
-int parse_parameters()
+int parse_parameters(tftp_request *req)
 {
     size_t len = 0;
     struct stat st = {0};
     char *filename = NULL;
-    tftp_context *ctx = &(g_sess_args.tftp_ctx);
 
-    if (ctx->action == CODE_WRQ)
+    if (req->type == CODE_WRQ)
     {
-        if (g_sess_args.local_name[g_sess_args.local_len - 1] == '/')
+        if (req->local_name[req->local_len - 1] == '/')
         {
-            LOG_ERROR("%s: local file path is directory", g_sess_args.local_name);
+            LOG_ERROR("%s: Local file path is directory", req->local_name);
             return -1;
         }
 
-        if (access(g_sess_args.local_name, F_OK | R_OK) != 0)
+        if (access(req->local_name, F_OK | R_OK) != 0)
         {
-            LOG_ERROR("access %s: %s", g_sess_args.local_name, strerror(errno));
+            LOG_ERROR("access %s: %s", req->local_name, strerror(errno));
             return -1;
         }
 
-        if (g_sess_args.remote_name[g_sess_args.remote_len - 1] == '/')
+        if (req->remote_name[req->remote_len - 1] == '/')
         {
-            filename = strrchr(g_sess_args.local_name, '/');
+            filename = strrchr(req->local_name, '/');
             if (filename != NULL)
             {
                 filename++;
@@ -146,39 +145,39 @@ int parse_parameters()
             }
             else
             {
-                filename = g_sess_args.local_name;
-                len = g_sess_args.local_len;
+                filename = req->local_name;
+                len = req->local_len;
             }
 
-            if ((g_sess_args.remote_len + len) >= PATH_LEN)
+            if ((req->remote_len + len) >= PATH_LEN)
             {
-                LOG_ERROR("Destination file name %s%s is too long", g_sess_args.remote_name, filename);
+                LOG_ERROR("Remote file path cannot be longer than the limit" TOSTRING(PATH_LEN));
                 return -1;
             }
-            strncat(g_sess_args.remote_name, filename, len);
-            g_sess_args.remote_len += len;
+            strncat(req->remote_name, filename, len);
+            req->remote_len += len;
         }
 
-        if (stat(g_sess_args.local_name, &st) == -1)
+        if (stat(req->local_name, &st) == -1)
         {
-            LOG_ERROR("stat %s: %s", g_sess_args.local_name, strerror(errno));
+            LOG_ERROR("stat %s: %s", req->local_name, strerror(errno));
             return -1;
         }
 
-        ctx->file_size = st.st_size;
-        ctx->file_desc = open(g_sess_args.local_name, O_RDONLY);
+        req->file_size = st.st_size;
+        req->file_desc = open(req->local_name, O_RDONLY);
     }
-    else if (ctx->action == CODE_RRQ)
+    else if (req->type == CODE_RRQ)
     {
-        if (g_sess_args.remote_name[g_sess_args.remote_len - 1] == '/')
+        if (req->remote_name[req->remote_len - 1] == '/')
         {
-            LOG_ERROR("%s: Remote file path is directory", g_sess_args.remote_name);
+            LOG_ERROR("%s: Remote file path is directory", req->remote_name);
             return -1;
         }
 
-        if (g_sess_args.local_name[g_sess_args.local_len - 1] == '/')
+        if (req->local_name[req->local_len - 1] == '/')
         {
-            filename = strrchr(g_sess_args.remote_name, '/');
+            filename = strrchr(req->remote_name, '/');
             if (filename != NULL)
             {
                 filename++;
@@ -186,24 +185,27 @@ int parse_parameters()
             }
             else
             {
-                filename = g_sess_args.remote_name;
-                len = g_sess_args.remote_len;
+                filename = req->remote_name;
+                len = req->remote_len;
             }
 
-            if ((g_sess_args.local_len + len) >= PATH_MAX)
+            if ((req->local_len + len) >= PATH_MAX)
             {
-                LOG_ERROR("Local file name %s%s will be too long", g_sess_args.local_name, filename);
+                    LOG_ERROR("Local file path cannot be longer than " TOSTRING(PATH_LEN));
                 return -1;
             }
-            strncat(g_sess_args.local_name, filename, len);
-            g_sess_args.local_len += len;
+            strncat(req->local_name, filename, len);
+            req->local_len += len;
         }
-        ctx->file_desc = open(g_sess_args.local_name, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+        req->file_desc = open(req->local_name, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     }
 
-    if (ctx->file_desc < 0)
+    if (req->is_tsize_off)
+        req->file_size = -1;
+
+    if (req->file_desc < 0)
     {
-        LOG_ERROR("Unable to open local file %s: %s", g_sess_args.local_name, strerror(errno));
+        LOG_ERROR("Unable to open local file %s: %s", req->local_name, strerror(errno));
         return -1;
     }
 
@@ -214,11 +216,11 @@ int parse_parameters()
  * Convert hostname or ip address from string to
  * network form and stores in dest_addr pointer.
  */
-int parse_ip_address(const char *ip_addr, char *port_no, tftp_context *ctx)
+int parse_ip_address(tftp_request *req, const char *ip_addr, char *port_no)
 {
     uint16_t port = TFTP_PORT_NO;
-    s_addr4 *ipv4 = (s_addr4 *)&(ctx->addr);
-    s_addr6 *ipv6 = (s_addr6 *)&(ctx->addr);
+    s_addr4 *ipv4 = (s_addr4 *)&(req->addr);
+    s_addr6 *ipv6 = (s_addr6 *)&(req->addr);
 
     if (port_no && is_valid_portnum(port_no, &port) == false)
     {
@@ -230,13 +232,13 @@ int parse_ip_address(const char *ip_addr, char *port_no, tftp_context *ctx)
     {
         ipv4->sin_family = AF_INET;
         ipv4->sin_port = htons(port);
-        ctx->addr_len = sizeof(s_addr4);
+        req->addr_len = sizeof(s_addr4);
     }
     else if (inet_pton(AF_INET6, ip_addr, &(ipv6->sin6_addr)) == 1)
     {
         ipv6->sin6_family = AF_INET6;
         ipv6->sin6_port = htons(port);
-        ctx->addr_len = sizeof(s_addr6);
+        req->addr_len = sizeof(s_addr6);
     }
     else
     {
@@ -248,137 +250,89 @@ int parse_ip_address(const char *ip_addr, char *port_no, tftp_context *ctx)
 }
 
 /**
- *
- */
-int init_client_request(tftp_context *ctx)
-{
-    int ret = 0;
-    size_t curr_len = 0;
-    size_t option_len = 0;
-    char *curr_ptr = NULL;
-    char option[OPTION_LEN] = {0};
-
-    set_opcode(ctx->tx_buf, ctx->action);
-    curr_len += ARGS_HDR_LEN;
-    curr_ptr = ctx->tx_buf + ARGS_HDR_LEN;
-
-    strncpy(curr_ptr, g_sess_args.remote_name, g_sess_args.remote_len);
-    curr_ptr += g_sess_args.remote_len + 1;
-    curr_len += g_sess_args.remote_len + 1;
-
-    option_len = tftp_mode_to_str(ctx->mode, option);
-    if (curr_len + option_len > DEF_BLK_SIZE)
-    {
-        LOG_ERROR("Remote file name is too long");
-        return -1;
-    }
-
-    strncpy(curr_ptr, option, option_len);
-    curr_ptr += option_len + 1;
-    curr_len += option_len + 1;
-
-    ret = insert_options(curr_ptr, DEF_BLK_SIZE - curr_len, ctx->blk_size, ctx->file_size, ctx->win_size);
-    if (ret == -1)
-    {
-        LOG_ERROR("Remote file name is too long");
-        return -1;
-    }
-
-    ctx->tx_len = curr_len + (size_t)ret;
-    ctx->is_oack = (ret > 0);
-#ifdef DEBUG
-    print_tftp_request(ctx->tx_buf, ctx->tx_len);
-#endif
-    return 0;
-}
-
-/**
  * Parses the OACK packet sent by the server
  * Extracts the file size in case of download
  * Validates block size and window size acknowledgement
  */
-int parse_oack_string(tftp_context *ctx)
+int parse_oack_string(tftp_request *req)
 {
     int ret = 0;
-    pthread_t prog_t;
     size_t *blk_size = NULL;
     size_t *win_size = NULL;
     off_t *file_size = NULL;
 
 #ifdef DEBUG
-    print_tftp_request(ctx->rx_buf, (size_t)ctx->rx_len);
+    print_tftp_request(req->rx_buf, req->rx_len);
 #endif
+    if (req->blk_size != DEF_BLK_SIZE)
+        blk_size = &(req->blk_size);
 
-    if (ctx->blk_size != DEF_BLK_SIZE)
-        blk_size = &(ctx->blk_size);
+    if (req->win_size != DEF_WIN_SIZE)
+        win_size = &(req->win_size);
 
-    if (ctx->win_size != DEF_WIN_SIZE)
-        win_size = &(ctx->win_size);
+    if (req->file_size == 0 && req->type == CODE_RRQ)
+        file_size = &(req->file_size);
 
-    if (ctx->file_size == 0 && ctx->action == CODE_RRQ)
-        file_size = &(ctx->file_size);
-
-    ret = extract_options(ctx->rx_buf + ARGS_HDR_LEN, (size_t) ctx->rx_len - ARGS_HDR_LEN, blk_size, file_size, win_size);
+    ret = extract_options(req->rx_buf + ARGS_HDR_LEN, req->rx_len - ARGS_HDR_LEN, blk_size, file_size, win_size);
     if (ret)
     {
-        send_error_packet(ctx, EBADOPT);
+        send_error_packet(req->conn_sock, NULL, EBADOPT);
         return -1;
     }
 
-    if (ctx->BUF_SIZE != ctx->blk_size + DATA_HDR_LEN)
+    if (req->type == CODE_RRQ)
     {
-        ctx->BUF_SIZE = ctx->blk_size + DATA_HDR_LEN;
-
-        ctx->tx_buf = realloc(ctx->tx_buf, ctx->BUF_SIZE);
-        if (ctx->tx_buf == NULL)
-        {
-            LOG_ERROR("realloc: %s", strerror(errno));
-            send_error_packet(ctx, EUNDEF);
-            return -1;
-        }
-
-        ctx->rx_buf = realloc(ctx->rx_buf, ctx->BUF_SIZE);
-        if (ctx->rx_buf == NULL)
-        {
-            LOG_ERROR("realloc: %s", strerror(errno));
-            send_error_packet(ctx, EUNDEF);
-            return -1;
-        }
-
-        memset(ctx->tx_buf, 0, ctx->BUF_SIZE);
-        memset(ctx->rx_buf, 0, ctx->BUF_SIZE);
+        req->state = SEND_ACK;
+    }
+    else if (req->type == CODE_WRQ)
+    {
+        req->state = SEND_DATA;
     }
 
-    if (ctx->file_size <= 0)
-        is_prog_bar = false;
+    return 0;
+}
 
+/**
+ * 
+ */
+int init_tftp_request(tftp_request *req)
+{
+    size_t option_len = 0;
+    char *curr_ptr = req->tx_buf + ARGS_HDR_LEN;
 
-    if (is_prog_bar)
+    set_opcode(req->tx_buf, req->type);
+    req->tx_len = ARGS_HDR_LEN;
+
+    strncpy(curr_ptr, req->remote_name, req->remote_len);
+    req->tx_len += req->remote_len + 1;
+    curr_ptr += req->remote_len + 1;
+
+    strncpy(curr_ptr, "octet", 6);
+    req->tx_len += 6;
+    curr_ptr += 6;
+
+    option_len = insert_options(curr_ptr, req->blk_size, req->file_size, req->win_size);
+    req->tx_len += option_len;
+    if (req->tx_len > REQUEST_SIZE)
     {
-        ret = pthread_create(&prog_t, NULL, progress_bar, ctx);
-        if (ret != 0)
-        {
-            is_prog_bar = false;
-            LOG_ERROR("pthread_create: %d", ret);
-        }
+        LOG_ERROR("Request size longer than " STRINGIFY(REQUEST_SIZE) ", reduce file path len");
+        return -1;
     }
 
-    if (ctx->action == CODE_RRQ)
-    {
-        ctx->r_block_num = 0;
-        ctx->tx_len = DATA_HDR_LEN;
-        set_opcode(ctx->tx_buf, CODE_ACK);
-        set_blocknum(ctx->tx_buf, ctx->r_block_num);
-        tftp_recv_file(ctx, true);
-    }
-    else if (ctx->action == CODE_WRQ)
-    {
-        tftp_send_file(ctx, false);
-    }
+    if (option_len > 0)
+        req->is_oack = true;
 
-    if (is_prog_bar)
-        pthread_join(prog_t, NULL);
+#ifdef DEBUG
+    print_tftp_request(req->tx_buf, req->tx_len);
+#endif
 
+    req->conn_sock = socket(req->addr.ss_family, SOCK_DGRAM, 0);
+    if (req->conn_sock < 0)
+    {
+        close(req->file_desc);
+        LOG_ERROR("%s socket %s", __func__, strerror(errno));
+        return -1;
+    }
     return 0;
 }
 
@@ -389,127 +343,341 @@ int parse_oack_string(tftp_context *ctx)
  *
  * Returns the size of the data read in first packet, -1 on error.
  */
-int tftp_connect(tftp_context *ctx)
+int tftp_connect(tftp_request *req)
 {
     int ret = 0;
-    int retries = TFTP_NUM_RETRIES;
-    int wait_time = TFTP_TIMEOUT_MS;
+    int attempts = 0;
+    struct pollfd pfd = {0};
+    
+    ssize_t bytes_sent = 0;
+    ssize_t bytes_recv = 0;
     TFTP_OPCODE code = CODE_UNDEF;
 
-    ssize_t bytes_sent = 0;
-    uint16_t block_num = 0;
-    struct pollfd pfd = {0};
+    req->state = SEND_REQ;
 
-    ctx->conn_sock = socket(ctx->addr.ss_family, SOCK_DGRAM, 0);
-    if (ctx->conn_sock < 0)
+    while (1)
     {
-        LOG_ERROR("%s socket %s", __func__, strerror(errno));
+        bytes_sent = sendto(req->conn_sock, req->tx_buf, req->tx_len, 0,
+                            (s_addr *)&(req->addr), req->addr_len);
+        
+        if (bytes_sent != (ssize_t)req->tx_len)
+        {
+            LOG_ERROR("%s sendto: %s", __func__, strerror(errno));
+            return -1;
+        }
+
+wait_again:
+        pfd.fd = req->conn_sock;
+        pfd.events = POLLIN;
+        ret = poll(&pfd, 1, TFTP_TIMEOUT_MS);
+
+        if (ret == 0)
+        {
+            if (attempts == TFTP_NUM_RETRIES)
+            {
+                LOG_ERROR("tftp timeout");
+                return -1;
+            }
+            attempts++;
+        }
+        else if (ret < 0)
+        {
+            if (errno == EINTR)
+                goto wait_again;
+
+            LOG_ERROR("%s poll: %s", __func__, strerror(errno));
+            return -1;
+        }
+        else
+        {
+            break;
+        }
+
+    }
+                
+    bytes_recv = recvfrom(req->conn_sock, req->rx_buf, req->BUF_SIZE, 0, (s_addr *)&(req->addr), &req->addr_len);
+    if (bytes_recv < 0)
+    {
+        LOG_ERROR("%s recv: %s", __func__, strerror(errno));
+        return -1;
+    }
+    else if (bytes_recv < DATA_HDR_LEN)
+    {
+        LOG_ERROR("%s: Received packet is too small (%ld bytes)", __func__, bytes_recv);
         return -1;
     }
 
-send_again:
-    bytes_sent = sendto(ctx->conn_sock, ctx->tx_buf, ctx->tx_len, 0, (s_addr *)&(ctx->addr), ctx->addr_len);
-    if (bytes_sent != (ssize_t)ctx->tx_len)
+    code = get_opcode(req->rx_buf);
+    if (code == CODE_ERROR)
     {
-        LOG_ERROR("%s sendto: %s", __func__, strerror(errno));
+        handle_error_packet(req->rx_buf, bytes_recv);
         return -1;
     }
-
-recv_again:
-    pfd.fd = ctx->conn_sock;
-    pfd.events = POLLIN;
-    ret = poll(&pfd, 1, wait_time);
-
-    retries--;
-    if (retries == 0)
+    else if ((req->is_oack && code == CODE_OACK) ||
+             (req->type == CODE_RRQ && code == CODE_DATA && get_blocknum(req->rx_buf) == 1) ||
+             (req->type == CODE_WRQ && code == CODE_ACK && get_blocknum(req->rx_buf) == 0))
     {
-        LOG_ERROR("TFTP timeout");
-        return -1;
+        req->rx_len = (size_t)bytes_recv;
     }
-
-    if (ret == 0)
+    else
     {
-        wait_time += (wait_time >> 1);
-        if (wait_time > TFTP_MAXTIMEOUT_MS)
-            wait_time = TFTP_MAXTIMEOUT_MS;
-        goto send_again;
-    }
-    else if (ret < 0)
-    {
-        LOG_ERROR("%s poll: %s", __func__, strerror(errno));
-        return -1;
-    }
-
-    ctx->rx_len = recvfrom(ctx->conn_sock, ctx->rx_buf, ctx->BUF_SIZE, 0, (s_addr *)&(ctx->addr), &ctx->addr_len);
-    if (ctx->rx_len <= 0)
-    {
-        LOG_ERROR("%s recvfrom: %s", __func__, strerror(errno));
-        return -1;
-    }
-    else if (ctx->rx_len < DATA_HDR_LEN)
-    {
-        LOG_ERROR("Received corrupted packet with length %ld", ctx->rx_len);
-        goto recv_again;
-    }
-
-    code = get_opcode(ctx->rx_buf);
-    block_num = get_blocknum(ctx->rx_buf);
-    if(code == CODE_ERROR)
-    {
-        handle_error_packet(ctx->rx_buf, ctx->rx_len);
-        return -1;
-    }
-    else if (code == CODE_ACK && block_num == 0 && ctx->action == CODE_WRQ)
-    {
-        goto connect_socket;
-    }
-    else if (code == CODE_DATA && block_num == 1 && ctx->action == CODE_RRQ)
-    {
-        goto connect_socket;
-    }
-    else if (code == CODE_OACK)
-    {
-        goto connect_socket;
-    }
-
 #ifdef DEBUG
-    LOG_ERROR("Recieved unexpected opcode %d block num %d", code, block_num);
+        LOG_ERROR("Recieved unexpected opcode %d block num %d", code, get_blocknum(req->rx_buf));
+#else
+        LOG_ERROR("Recived unexpected data");
 #endif
-    goto recv_again;
+        set_opcode(req->tx_buf, CODE_ERROR);
+        set_blocknum(req->tx_buf, EBADOP);
+        req->tx_len = DATA_HDR_LEN;
+        bytes_sent = sendto(req->conn_sock, req->tx_buf, req->tx_len, 0, (s_addr *)&(req->addr), req->addr_len);
+        return -1;
+    }
 
-connect_socket:
-    ret = connect(ctx->conn_sock, (s_addr *)&(ctx->addr), ctx->addr_len);
+    ret = connect(req->conn_sock, (s_addr *)&(req->addr), req->addr_len);
     if (ret != 0)
     {
         LOG_ERROR("%s connect: %s", __func__, strerror(errno));
         return -1;
     }
 
-    if (code == CODE_OACK)
+    if (code == CODE_DATA)
     {
-        ret = parse_oack_string(ctx);
-        if (ret != 0)
-            return -1;
+        req->rx_len = (size_t) bytes_recv - DATA_HDR_LEN;
+        req->state = RECV_DATA;
+        return 0;
     }
-    else if (ctx->action == CODE_RRQ)
+    else if (code == CODE_ACK)
     {
-        tftp_recv_file(ctx, false);
-    }
-    else if (ctx->action == CODE_WRQ)
-    {
-        tftp_send_file(ctx, false);
+        req->state = SEND_DATA;
+        return 0;
     }
 
+    return parse_oack_string(req);
+}
+
+int tftp_recv_file(tftp_request *req)
+{
+    TFTP_CLIENT_STATE prev_state = RRQ_SENT;
+    size_t w_block_num = 0;
+    size_t l_block_num = 0;
+    size_t r_block_num = 0;
+
+    ssize_t bytes_writ = 0;
+    ssize_t bytes_recv = 0;
+    ssize_t bytes_sent = 0;
+
+    TFTP_OPCODE r_opcode = CODE_UNDEF;
+
+    int attempts = 0;
+    int timeout = TFTP_TIMEOUT_MS;
+
+    while(1)
+    {
+        switch(req->state)
+        {
+            case SEND_ACK:
+            {
+                set_opcode(req->tx_buf, CODE_ACK);
+                set_blocknum(req->tx_buf, l_block_num);
+                req->tx_len = DATA_HDR_LEN;
+
+                bytes_sent = send(req->conn_sock, req->tx_buf, req->tx_len, 0);
+                if (bytes_sent < 0)
+                {
+                    LOG_ERROR("%s send DATA %s", __func__, strerror(errno));
+                    return -1;
+                }
+
+                if (prev_state != RRQ_SENT && req->rx_len < req->blk_size)
+                    return 0;
+
+                w_block_num = 0;
+                prev_state = SEND_ACK;
+                req->state = WAIT_PKT;
+                break;
+            }
+            case WAIT_PKT:
+            {
+                bytes_recv = safe_recv(req->conn_sock, req->rx_buf, req->BUF_SIZE, timeout);
+                if (bytes_recv == 0)
+                {
+                    if (attempts == TFTP_NUM_RETRIES)
+                    {
+                        LOG_ERROR("tftp timeout");
+                        return -1;
+                    }
+                    attempts++;
+                    req->state = prev_state;
+                    break;
+                }
+                else if (bytes_recv < 0)
+                {
+                    send_error_packet(req->conn_sock, "recv error", EUNDEF);
+                    return -1;
+                }
+                
+                r_opcode = get_opcode(req->rx_buf);
+                r_block_num = tftp_rollover_blocknumber(get_blocknum(req->rx_buf), l_block_num);
+                if (r_opcode != CODE_DATA)
+                {
+                    attempts++;
+                    break;
+                }
+                else if (r_block_num != l_block_num + 1)
+                {
+                    break;
+                }
+
+                req->rx_len = (size_t) bytes_recv - DATA_HDR_LEN;
+                req->state = RECV_DATA;
+                break;                
+            }
+            case RECV_DATA:
+            {
+                bytes_writ = file_write(req->file_desc, req->rx_buf + DATA_HDR_LEN, req->rx_len);
+                if (bytes_writ != (ssize_t)req->rx_len)
+                {
+                    send_error_packet(req->conn_sock, "Error writing to file", EUNDEF);
+                    return -1;
+                }
+                l_block_num++;
+                w_block_num++;
+
+                if (w_block_num == req->win_size || req->rx_len < req->blk_size)
+                    req->state = SEND_ACK;
+                else
+                    req->state = WAIT_PKT;
+                break;
+            }
+            default:
+            {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+int tftp_send_file(tftp_request *req)
+{
+    size_t w_block_num = 0;
+    size_t e_block_num = 1;
+    size_t l_block_num = 0;
+    size_t r_block_num = 0;
+
+    ssize_t bytes_read = 0;
+    ssize_t bytes_recv = 0;
+    ssize_t bytes_sent = 0;
+
+    TFTP_OPCODE r_opcode = CODE_UNDEF;
+
+    int attempts = 0;
+    int timeout = TFTP_TIMEOUT_MS;
+
+    while(1)
+    {
+        switch(req->state)
+        {
+            case SEND_DATA:
+            {
+                set_opcode(req->tx_buf, CODE_DATA);
+                set_blocknum(req->tx_buf, e_block_num);
+                bytes_read = file_read(req->file_desc, req->tx_buf + DATA_HDR_LEN, req->blk_size, e_block_num);
+                if (bytes_read < 0)
+                {
+                    send_error_packet(req->conn_sock, "file read error", EUNDEF);
+                    return -1;
+                }
+                req->tx_len = DATA_HDR_LEN + (size_t)bytes_read;
+
+                bytes_sent = send(req->conn_sock, req->tx_buf, req->tx_len, 0);
+                if (bytes_sent < 0)
+                {
+                    LOG_ERROR("%s send DATA %s", __func__, strerror(errno));
+                    return -1;
+                }
+
+                w_block_num++;
+                e_block_num++;
+                if (w_block_num == req->win_size || req->tx_len < req->BUF_SIZE)
+                {
+                    req->state = WAIT_PKT;
+                }
+                break;
+            }
+            case WAIT_PKT:
+            {
+                bytes_recv = safe_recv(req->conn_sock, req->rx_buf, req->BUF_SIZE, timeout);
+
+                // If timeout occured resend all packets in window
+                if (bytes_recv == 0)
+                {
+                    if (attempts == TFTP_NUM_RETRIES)
+                    {
+                        LOG_ERROR("tftp timeout");
+                        return -1;
+                    }
+                    attempts++;
+                    w_block_num = 0;
+                    e_block_num -= req->win_size;
+                    req->state = SEND_DATA;
+                    break;
+                }
+                else if (bytes_recv < 0)
+                {
+                    send_error_packet(req->conn_sock, "recv error", EUNDEF);
+                    return -1;
+                }
+                
+                r_opcode = get_opcode(req->rx_buf);
+                r_block_num = tftp_rollover_blocknumber(get_blocknum(req->rx_buf), l_block_num);
+                if (r_opcode != CODE_ACK)
+                {
+                    // If non ack packet is received, discard
+                    // And  wait for another packet
+                    attempts++;
+                    break;
+                }
+
+                // Consider block num roll over
+                if (r_block_num <= l_block_num)
+                {
+                    // If recieved ack is an older ack discard
+                    // If data packets were lost and we recieved last ack
+                    // Wait for timeout to prevent SAS and resend all packets
+                    break;
+                }
+                else if (r_block_num >= e_block_num)
+                {
+                    break;
+                }
+                req->state = RECV_ACK;
+                break;                
+            }
+            case RECV_ACK:
+            {
+                if (req->tx_len < req->BUF_SIZE)
+                    return 0;
+
+                l_block_num = r_block_num;
+                w_block_num = 0;
+                attempts = 0;
+                req->state = SEND_DATA;
+                break;
+            }
+            default:
+            {
+                return -1;
+            }
+        }
+    }
     return 0;
 }
 
 int main(int argc, char *argv[])
 {
     int ret = 0;
-    tftp_context *ctx = &(g_sess_args.tftp_ctx);
-    TFTP_OPCODE action = CODE_UNDEF;
-    size_t win_size = DEF_WIN_SIZE;
-    size_t block_size = DEF_BLK_SIZE;
+    tftp_request req;
 
 #ifdef TIMER_ON
     double elapsed = 0;
@@ -518,19 +686,24 @@ int main(int argc, char *argv[])
 #endif
 
     g_exe_name = argv[0];
-    memset(&g_sess_args, 0, sizeof(tftp_client));
+    memset(&req, 0, sizeof(tftp_request));
+
+    req.conn_sock = -1;
+    req.file_desc = -1;
+    req.blk_size = DEF_BLK_SIZE;
+    req.win_size = DEF_WIN_SIZE;
 
     ret = register_sighandler(handle_signal);
     if (ret != 0)
         return EXIT_FAILURE;
 
-    while ((ret = getopt(argc, argv, "l:r:b:w:gpqh")) != -1)
+    while ((ret = getopt(argc, argv, "l:r:b:w:gptqh")) != -1)
     {
         switch (ret)
         {
             case 'b':
             {
-                if (!is_valid_blocksize(optarg, &block_size))
+                if (!is_valid_blocksize(optarg, &req.blk_size))
                 {
                     printf("Invalid Block Size %s\n", optarg);
                     print_usage("");
@@ -540,7 +713,7 @@ int main(int argc, char *argv[])
             }
             case 'w':
             {
-                if (!is_valid_windowsize(optarg, &win_size))
+                if (!is_valid_windowsize(optarg, &req.win_size))
                 {
                     printf("Invalid Window Size %s\n", optarg);
                     print_usage("");
@@ -550,22 +723,22 @@ int main(int argc, char *argv[])
             }
             case 'g':
             {
-                if (action != CODE_UNDEF)
+                if (req.type != CODE_UNDEF)
                 {
                     print_usage("Either -g or -p can be passed, not both");
                     return EXIT_FAILURE;
                 }
-                action = CODE_RRQ;
+                req.type = CODE_RRQ;
                 break;
             }
             case 'p':
             {
-                if (action != CODE_UNDEF)
+                if (req.type != CODE_UNDEF)
                 {
                     print_usage("Either -g or -p can be passed, not both");
                     return EXIT_FAILURE;
                 }
-                action = CODE_WRQ;
+                req.type = CODE_WRQ;
                 break;
             }
             case 'l':
@@ -575,13 +748,13 @@ int main(int argc, char *argv[])
                     print_usage("Local path not provided");
                     return EXIT_FAILURE;
                 }
-                g_sess_args.local_len = strnlen(optarg, PATH_MAX);
-                if (g_sess_args.local_len >= PATH_MAX)
+                req.local_len = strnlen(optarg, PATH_MAX);
+                if (req.local_len >= PATH_MAX)
                 {
                     print_usage("Local path should be shorter than " TOSTRING(PATH_MAX));
                     return EXIT_FAILURE;
                 }
-                strncpy(g_sess_args.local_name, optarg, g_sess_args.local_len);
+                strncpy(req.local_name, optarg, req.local_len);
                 break;
             }
             case 'r':
@@ -591,13 +764,18 @@ int main(int argc, char *argv[])
                     print_usage("Remote path not provided");
                     return EXIT_FAILURE;
                 }
-                g_sess_args.remote_len = strnlen(optarg, PATH_LEN);
-                if (g_sess_args.remote_len >= PATH_LEN)
+                req.remote_len = strnlen(optarg, PATH_LEN);
+                if (req.remote_len >= PATH_LEN)
                 {
-                    print_usage("Remote path is too long");
+                    print_usage("Remote path should be shorter than " TOSTRING(PATH_LEN));
                     return EXIT_FAILURE;
                 }
-                strncpy(g_sess_args.remote_name, optarg, g_sess_args.remote_len);
+                strncpy(req.remote_name, optarg, req.remote_len);
+                break;
+            }
+            case 't':
+            {
+                req.is_tsize_off = true;
                 break;
             }
             case 'q':
@@ -619,19 +797,19 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (action == CODE_UNDEF)
+    if (req.type == CODE_UNDEF)
     {
         print_usage("Either -g or -p option is required");
         return EXIT_FAILURE;
     }
 
-    if (g_sess_args.local_len == 0)
+    if (req.local_len == 0)
     {
         print_usage("Need to specify local path");
         return EXIT_FAILURE;
     }
 
-    if (g_sess_args.remote_len == 0)
+    if (req.remote_len == 0)
     {
         print_usage("Need to specify remote path");
         return EXIT_FAILURE;
@@ -643,40 +821,45 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    ret = init_tftp_context(ctx, action, block_size, win_size);
-    if (ret)
-        return EXIT_FAILURE;
+    req.BUF_SIZE = req.blk_size + DATA_HDR_LEN;
 
-    ret = parse_ip_address(argv[optind], argv[optind + 1], ctx);
+    ret = parse_ip_address(&req, argv[optind], argv[optind + 1]);
     if (ret)
     {
-        free_tftp_context(ctx);
         return EXIT_FAILURE;
     }
 
-    ret = parse_parameters();
+    ret = parse_parameters(&req);
     if (ret)
     {
-        free_tftp_context(ctx);
         return EXIT_FAILURE;
     }
 
-    ret = init_client_request(ctx);
+    ret = init_tftp_request(&req);
     if (ret)
     {
-        free_tftp_context(ctx);
-        return EXIT_FAILURE;
+        close(req.file_desc);
     }
 
 #ifdef TIMER_ON
     clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
 
-    ret = tftp_connect(ctx);
+    ret = tftp_connect(&req);
     if (ret)
     {
-        free_tftp_context(ctx);
+        close(req.file_desc);
+        close(req.conn_sock);
         return EXIT_FAILURE;
+    }
+
+    if (req.type == CODE_RRQ)
+    {
+        ret = tftp_recv_file(&req);
+    }
+    else if (req.type == CODE_WRQ)
+    {
+        ret = tftp_send_file(&req);
     }
 
 #ifdef TIMER_ON
@@ -685,6 +868,9 @@ int main(int argc, char *argv[])
               (double)(end.tv_nsec - start.tv_nsec) / 1e6;
     LOG_INFO("Elapsed time: %.3f ms", elapsed);
 #endif
+
+    close(req.conn_sock);
+    close(req.file_desc);
 
     fflush(stderr);
     fflush(stdout);
