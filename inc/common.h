@@ -46,9 +46,6 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-// #define PACKET_DEBUG 1
-#define PACKET_LOG_FILE "/tmp/pkt_bifrost.log"
-
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 
@@ -79,9 +76,9 @@
 #define DATA_HDR_LEN    4
 #define ARGS_HDR_LEN    2
 
-#define TFTP_TIMEOUT_MS            500
-#define TFTP_MAXTIMEOUT_MS        3000
-#define TFTP_NUM_RETRIES            10
+#define TFTP_TIMEOUT_MS      400
+#define TFTP_MAXTIMEOUT_MS   2000
+#define TFTP_NUM_RETRIES     10
 
 #define BLKSIZE_OP      "blksize"
 #define BLKSIZE_OPLEN   7

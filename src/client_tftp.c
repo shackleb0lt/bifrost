@@ -347,6 +347,7 @@ int tftp_connect(tftp_request *req)
 {
     int ret = 0;
     int attempts = 0;
+    int timeout = TFTP_TIMEOUT_MS;
     struct pollfd pfd = {0};
     
     ssize_t bytes_sent = 0;
@@ -369,7 +370,7 @@ int tftp_connect(tftp_request *req)
 wait_again:
         pfd.fd = req->conn_sock;
         pfd.events = POLLIN;
-        ret = poll(&pfd, 1, TFTP_TIMEOUT_MS);
+        ret = poll(&pfd, 1, timeout);
 
         if (ret == 0)
         {
@@ -378,6 +379,9 @@ wait_again:
                 LOG_ERROR("tftp timeout");
                 return -1;
             }
+            timeout += (timeout >> 1);
+            if (timeout > TFTP_MAXTIMEOUT_MS)
+                timeout = TFTP_MAXTIMEOUT_MS;
             attempts++;
         }
         else if (ret < 0)
@@ -484,10 +488,10 @@ int tftp_recv_file(tftp_request *req)
                 bytes_sent = send(req->conn_sock, req->tx_buf, req->tx_len, 0);
                 if (bytes_sent < 0)
                 {
-                    LOG_ERROR("%s send DATA %s", __func__, strerror(errno));
+                    LOG_ERROR("%s send ACK %s", __func__, strerror(errno));
                     return -1;
                 }
-
+                
                 if (prev_state != RRQ_SENT && req->rx_len < req->blk_size)
                     return 0;
 
@@ -506,6 +510,9 @@ int tftp_recv_file(tftp_request *req)
                         LOG_ERROR("tftp timeout");
                         return -1;
                     }
+                    timeout += (timeout >> 1);
+                    if (timeout > TFTP_MAXTIMEOUT_MS)
+                        timeout = TFTP_MAXTIMEOUT_MS;
                     attempts++;
                     req->state = prev_state;
                     break;
@@ -527,7 +534,6 @@ int tftp_recv_file(tftp_request *req)
                 {
                     break;
                 }
-
                 req->rx_len = (size_t) bytes_recv - DATA_HDR_LEN;
                 req->state = RECV_DATA;
                 break;                
@@ -540,6 +546,7 @@ int tftp_recv_file(tftp_request *req)
                     send_error_packet(req->conn_sock, "Error writing to file", EUNDEF);
                     return -1;
                 }
+                attempts = 0;
                 l_block_num++;
                 w_block_num++;
 
@@ -603,7 +610,9 @@ int tftp_send_file(tftp_request *req)
                 {
                     req->state = WAIT_PKT;
                 }
-                break;
+                if (req->win_size > 4)
+                    usleep(10);
+                    break;
             }
             case WAIT_PKT:
             {
@@ -617,6 +626,9 @@ int tftp_send_file(tftp_request *req)
                         LOG_ERROR("tftp timeout");
                         return -1;
                     }
+                    timeout += (timeout >> 1);
+                    if (timeout > TFTP_MAXTIMEOUT_MS)
+                        timeout = TFTP_MAXTIMEOUT_MS;
                     attempts++;
                     w_block_num = 0;
                     e_block_num -= req->win_size;

@@ -390,6 +390,8 @@ int tftp_send_file(tftp_request *req)
                     prev_state = SEND_DATA;
                     req->state = WAIT_PKT;
                 }
+                if (req->win_size > 4)
+                    usleep(10);
                 break;
             }
             case WAIT_PKT:
@@ -404,6 +406,9 @@ int tftp_send_file(tftp_request *req)
                         LOG_ERROR("tftp timeout");
                         return -1;
                     }
+                    timeout += (timeout >> 1);
+                    if (timeout > TFTP_MAXTIMEOUT_MS)
+                        timeout = TFTP_MAXTIMEOUT_MS;
                     attempts++;
                     if (prev_state == SEND_DATA)
                     {
@@ -536,6 +541,9 @@ int tftp_recv_file(tftp_request *req)
                         LOG_ERROR("tftp timeout");
                         return -1;
                     }
+                    timeout += (timeout >> 1);
+                    if (timeout > TFTP_MAXTIMEOUT_MS)
+                        timeout = TFTP_MAXTIMEOUT_MS;
                     attempts++;
                     req->state = prev_state;
                     break;
@@ -570,6 +578,7 @@ int tftp_recv_file(tftp_request *req)
                     send_error_packet(req->conn_sock, "Error writing to file", EUNDEF);
                     return -1;
                 }
+                attempts = 0;
                 l_block_num++;
                 w_block_num++;
 
