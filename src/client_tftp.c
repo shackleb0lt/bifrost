@@ -875,5 +875,7 @@ int main(int argc, char *argv[])
 
     fflush(stderr);
     fflush(stdout);
+    if (ret)
+        return EXIT_FAILURE;
     return 0;
 }
