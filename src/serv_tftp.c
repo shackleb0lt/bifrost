@@ -456,6 +456,7 @@ int tftp_send_file(tftp_request *req)
                     return 0;
 
                 l_block_num = r_block_num;
+                e_block_num = l_block_num + 1;
                 w_block_num = 0;
                 attempts = 0;
                 req->state = SEND_DATA;

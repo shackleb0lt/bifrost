@@ -36,10 +36,10 @@ cleanup()
     wait $bg_pid
 }
 
-set -ex
+set -e
 
 make clean
-make debug
+make release
 
 sudo rm -f /srv/tftp/test_upload/*
 echo ""
