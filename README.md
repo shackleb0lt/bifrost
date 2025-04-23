@@ -33,8 +33,8 @@ These extensions improve performance and flexibility, especially for large file 
 - **Option Extensions:** Supports advanced TFTP options:
   - **RFC 2347:** Option extension mechanism
   - **RFC 2348:** Negotiation of block size up to 65464
-  - **RFC 2349:** (Partially) Transfer size negotiation
-  - **RFC 7440:** (Work in Progress) Window size negotiation
+  - **RFC 2349:** Transfer size negotiation (Partially, timeout not implemented)
+  - **RFC 7440:** Window size negotiation
 - **Block Number Rollover:** When block number reaches 65535 (UINT16_MAX) it resets to 0 allowing files larger than 32MB to be transferred. 
 - **Dual-Stack Support:** Works on both IPv4 and IPv6 networks.
 - **Robust Error Handling:** Provides comprehensive error codes and error management for various TFTP scenarios.
