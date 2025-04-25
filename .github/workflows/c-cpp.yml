@@ -1,0 +1,92 @@
+name: TFTP Test
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build Server and Client
+      run: make debug
+
+    - name: Generate Test Files
+      run: |
+        mkdir -p server_root/test/
+        mkdir -p server_root/test_up/
+        head -c 171 /dev/urandom > server_root/test/file1.bin
+        head -c 512 /dev/urandom > server_root/test/file2.bin
+        head -c $((40 * 1024 * 1024)) /dev/urandom > server_root/test/file3.bin
+        head -c $((400 * 1024 * 1024)) /dev/urandom > server_root/test/file4.bin
+
+    - name: Start TFTP Server
+      run: |
+        ./bld/serv_tftp -s server_root/ &
+        sleep 2
+
+    - name: Test small file size
+      run: |
+        ./bld/client_tftp -g -t -l bld/ -r test/file1.bin 127.0.0.1 6969
+        ./bld/client_tftp -p -t -l bld/file1.bin -r test_up/ 127.0.0.1 6969
+        cmp -s server_root/test/file1.bin server_root/test_up/file1.bin || exit 1
+  
+    - name: Test exact file size
+      run: |
+        ./bld/client_tftp -g -t -l bld/ -r test/file2.bin 127.0.0.1 6969
+        ./bld/client_tftp -p -t -l bld/file2.bin -r test_up/ 127.0.0.1 6969
+        cmp -s server_root/test/file2.bin server_root/test_up/file2.bin || exit 1
+  
+    - name: Test small file with option
+      run: |
+        ./bld/client_tftp -g -b 1024 -w 2 -l bld/ -r test/file1.bin 127.0.0.1 6969
+        ./bld/client_tftp -p -b 1024 -w 2 -l bld/file1.bin -r test_up/ 127.0.0.1 6969
+        cmp -s server_root/test/file1.bin server_root/test_up/file1.bin || exit 1
+    
+    - name: Test exact file with option
+      run: |
+        ./bld/client_tftp -g -w 2 -l bld/ -r test/file2.bin 127.0.0.1 6969
+        ./bld/client_tftp -p -w 2 -l bld/file2.bin -r test_up/ 127.0.0.1 6969
+        cmp -s server_root/test/file2.bin server_root/test_up/file2.bin || exit 1
+  
+    - name: Test block num rollover
+      run: |
+        ./bld/client_tftp -g -l bld/ -r test/file3.bin 127.0.0.1 6969
+        ./bld/client_tftp -p -l bld/file3.bin -r test_up/ 127.0.0.1 6969
+        cmp -s server_root/test/file3.bin server_root/test_up/file3.bin || exit 1
+
+    - name: Test double block num rollover 
+      run: |
+        ./bld/client_tftp -g -b 256 -l bld/ -r test/file3.bin 127.0.0.1 6969
+        ./bld/client_tftp -p -b 256 -l bld/file3.bin -r test_up/ 127.0.0.1 6969
+        cmp -s server_root/test/file3.bin server_root/test_up/file3.bin || exit 1
+      
+    - name: Test all option extensions
+      run: |
+        ./bld/client_tftp -g -b 1024 -w 8 -l bld/ -r test/file3.bin 127.0.0.1 6969
+        ./bld/client_tftp -p -b 1024 -w 8 -l bld/file3.bin -r test_up/ 127.0.0.1 6969
+        cmp -s server_root/test/file3.bin server_root/test_up/file3.bin || exit 1
+    
+    - name: Test large file size
+      run: |
+        ./bld/client_tftp -g -b 64000 -w 32 -l bld/ -r test/file4.bin 127.0.0.1 6969
+        ./bld/client_tftp -p -b 64000 -w 32 -l bld/file4.bin -r test_up/ 127.0.0.1 6969
+        cmp -s server_root/test/file4.bin server_root/test_up/file4.bin || exit 1
+  
+    - name: Test 10 concurrent downloads
+      run: |
+        mkdir -p bld/concurrent
+        for i in $(seq 1 10); do
+          ./bld/client_tftp -g -l bld/file3_copy_$i.bin -r test/file3.bin 127.0.0.1 6969 &
+        done
+        wait
+
+        for i in $(seq 1 10); do
+        cmp -s server_root/test/file3.bin bld/concurrent/file3_copy_$i.bin || exit 1
+        done
+      
