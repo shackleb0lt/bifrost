@@ -29,7 +29,7 @@ char *g_exe_name = NULL;
 /**
  * Prints the usage of the tftp client binary
  */
-void print_usage(char *err_str)
+void print_usage(const char *err_str)
 {
     if (err_str != NULL && *err_str != '\0')
         printf("Error: %s\n", err_str);
@@ -216,7 +216,7 @@ int parse_parameters(tftp_request *req)
  * Convert hostname or ip address from string to
  * network form and stores in dest_addr pointer.
  */
-int parse_ip_address(tftp_request *req, const char *ip_addr, char *port_no)
+int parse_ip_address(tftp_request *req, const char *ip_addr, const char *port_no)
 {
     uint16_t port = TFTP_PORT_NO;
     s_addr4 *ipv4 = (s_addr4 *)&(req->addr);
@@ -528,7 +528,7 @@ int tftp_recv_file(tftp_request *req)
                 if (r_opcode != CODE_DATA)
                 {
 #ifdef DEBUG
-                    LOG_ERROR("Expected DATA [%lu] Received %d [%lu]", l_block_num, r_opcode, r_block_num);
+                    LOG_ERROR("Expected DATA [%zu] Received %s [%zu]", l_block_num, tftp_opcode_to_str(r_opcode), r_block_num);
 #endif
                     attempts++;
                     break;
@@ -536,7 +536,7 @@ int tftp_recv_file(tftp_request *req)
                 else if (r_block_num != l_block_num + 1)
                 {
 #ifdef DEBUG
-                    LOG_ERROR("Expected DATA [%lu] Received DATA [%lu]", l_block_num , r_block_num);
+                    LOG_ERROR("Expected DATA [%zu] Received DATA [%zu]", l_block_num , r_block_num);
 #endif
                     break;
                 }
@@ -654,7 +654,7 @@ int tftp_send_file(tftp_request *req)
                 if (r_opcode != CODE_ACK)
                 {
 #ifdef DEBUG
-                    LOG_ERROR("Expected ACK [%lu] Received %d [%lu]", e_block_num - 1 , r_opcode, r_block_num);
+                    LOG_ERROR("Expected ACK [%zu] Received %s [%zu]", e_block_num - 1 , tftp_opcode_to_str(r_opcode), r_block_num);
 #endif
                     attempts++;
                     break;
@@ -667,14 +667,14 @@ int tftp_send_file(tftp_request *req)
                     // If data packets were lost and we recieved last ack
                     // Wait for timeout to prevent SAS and resend all packets
 #ifdef DEBUG
-                    LOG_ERROR("Expected ACK [%lu] Received ACK [%lu]", e_block_num - 1 , r_block_num);
+                    LOG_ERROR("Expected ACK [%zu] Received ACK [%zu]", e_block_num - 1 , r_block_num);
 #endif
                     break;
                 }
                 else if (r_block_num >= e_block_num)
                 {
 #ifdef DEBUG
-                    LOG_ERROR("Expected ACK [%lu] Received ACK [%lu]", e_block_num - 1 , r_block_num);
+                    LOG_ERROR("Expected ACK [%zu] Received ACK [%zu]", e_block_num - 1 , r_block_num);
 #endif
                     break;
                 }

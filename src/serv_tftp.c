@@ -28,7 +28,7 @@ char g_serv_path[PATH_MAX];
 char *g_exe_name = NULL;
 uint32_t g_thread_count = 0;
 
-void print_usage(char *err_str)
+void print_usage(const char *err_str)
 {
     if (err_str != NULL && *err_str != '\0')
         LOG_RAW("Error: %s\n", err_str);
@@ -184,7 +184,7 @@ int connect_to_client(tftp_request *req)
     return 0;
 }
 
-size_t parse_filename(tftp_request *req, char *filename)
+size_t parse_filename(tftp_request *req, const char *filename)
 {
     char *ptr = NULL;
     struct stat st = {0};

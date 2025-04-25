@@ -11,7 +11,7 @@ INC_DIR := inc
 BUILD_DIR := bld
 
 # Build modes and flags
-DEBUG_FLAGS := -O0 -g -Wformat=2 -Wconversion -Wimplicit-fallthrough -DDEBUG
+DEBUG_FLAGS := -O0 -g -Wformat=2 -Wconversion -Wimplicit-fallthrough -DDEBUG -fsanitize=address
 RELEASE_FLAGS := -O2 -fstack-protector-strong -D_FORTIFY_SOURCE=2
 RELEASE_LDFLAGS := -s -Wl,-z,noexecstack -Wl,-z,defs -Wl,-z,nodump
 

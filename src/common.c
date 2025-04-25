@@ -265,7 +265,7 @@ size_t insert_options(char buf[], size_t blk_size, off_t file_size, size_t win_s
 
     if (blk_size != DEF_BLK_SIZE)
     {
-        op_len = (size_t)snprintf(option, 64, "%lu", blk_size);
+        op_len = (size_t)snprintf(option, 64, "%zu", blk_size);
         curr_len += BLKSIZE_OPLEN + op_len + 2;
 
         strcpy(curr_ptr, BLKSIZE_OP);
@@ -287,7 +287,7 @@ size_t insert_options(char buf[], size_t blk_size, off_t file_size, size_t win_s
 
     if (win_size != DEF_WIN_SIZE)
     {
-        op_len = (size_t)snprintf(option, 64, "%lu", win_size);
+        op_len = (size_t)snprintf(option, 64, "%zu", win_size);
         curr_len += WINSIZE_OPLEN + op_len + 2;
 
         strcpy(curr_ptr, WINSIZE_OP);
@@ -551,7 +551,7 @@ ssize_t safe_recv(int fd, void *buf, size_t buf_size, int timeout)
  * This packet is sent to the server/client
  * indicating an error occurred and stop transfer
  */
-void send_error_packet(int conn_sock, char *err_str, TFTP_ERRCODE err_code)
+void send_error_packet(int conn_sock, const char *err_str, TFTP_ERRCODE err_code)
 {
     size_t len = 0;
     char buf[DATA_HDR_LEN + DEF_BLK_SIZE] = {0};

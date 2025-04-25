@@ -143,7 +143,7 @@ ssize_t file_write(int fd, const void *buf, size_t count);
 ssize_t safe_recv(int fd, void *buf, size_t buf_size, int timeout);
 
 void handle_error_packet(char rx_buf[], ssize_t buf_len);
-void send_error_packet(int conn_sock, char *err_str, TFTP_ERRCODE err_code);
+void send_error_packet(int conn_sock, const char *err_str, TFTP_ERRCODE err_code);
 
 size_t tftp_rollover_blocknumber(size_t block_number, size_t prev_block_number);
 size_t insert_options(char buf[], size_t blk_size, off_t file_size, size_t win_size);
