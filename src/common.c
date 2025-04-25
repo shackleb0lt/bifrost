@@ -429,11 +429,11 @@ size_t tftp_rollover_blocknumber(size_t block_number, size_t prev_block_number)
 {
     unsigned short b = (unsigned short)block_number;
     unsigned short pb = (unsigned short)prev_block_number;
-    long result = b | (prev_block_number & ~0xFFFF);
+    size_t result = b | (prev_block_number & ((size_t)~0xFFFF));
     if (b < 0x4000 && pb > 0xC000)
-    result += 0x10000;
-    else if (b > 0xC000 && pb < 0x4000 && (prev_block_number & ~0xFFFF))
-    result -= 0x10000;
+        result += 0x10000;
+    else if (b > 0xC000 && pb < 0x4000 && (prev_block_number & ((size_t)~0xFFFF)))
+        result -= 0x10000;
     return result;
 }
 

@@ -527,11 +527,17 @@ int tftp_recv_file(tftp_request *req)
                 r_block_num = tftp_rollover_blocknumber(get_blocknum(req->rx_buf), l_block_num);
                 if (r_opcode != CODE_DATA)
                 {
+#ifdef DEBUG
+                    LOG_ERROR("Expected DATA [%lu] Received %d [%lu]", l_block_num, r_opcode, r_block_num);
+#endif
                     attempts++;
                     break;
                 }
                 else if (r_block_num != l_block_num + 1)
                 {
+#ifdef DEBUG
+                    LOG_ERROR("Expected DATA [%lu] Received DATA [%lu]", l_block_num , r_block_num);
+#endif
                     break;
                 }
                 req->rx_len = (size_t) bytes_recv - DATA_HDR_LEN;
@@ -611,8 +617,10 @@ int tftp_send_file(tftp_request *req)
                     req->state = WAIT_PKT;
                 }
                 if (req->win_size > 4)
+                {
                     usleep(10);
-                    break;
+                }
+                break;
             }
             case WAIT_PKT:
             {
@@ -645,8 +653,9 @@ int tftp_send_file(tftp_request *req)
                 r_block_num = tftp_rollover_blocknumber(get_blocknum(req->rx_buf), l_block_num);
                 if (r_opcode != CODE_ACK)
                 {
-                    // If non ack packet is received, discard
-                    // And  wait for another packet
+#ifdef DEBUG
+                    LOG_ERROR("Expected ACK [%lu] Received %d [%lu]", e_block_num - 1 , r_opcode, r_block_num);
+#endif
                     attempts++;
                     break;
                 }
@@ -657,10 +666,16 @@ int tftp_send_file(tftp_request *req)
                     // If recieved ack is an older ack discard
                     // If data packets were lost and we recieved last ack
                     // Wait for timeout to prevent SAS and resend all packets
+#ifdef DEBUG
+                    LOG_ERROR("Expected ACK [%lu] Received ACK [%lu]", e_block_num - 1 , r_block_num);
+#endif
                     break;
                 }
                 else if (r_block_num >= e_block_num)
                 {
+#ifdef DEBUG
+                    LOG_ERROR("Expected ACK [%lu] Received ACK [%lu]", e_block_num - 1 , r_block_num);
+#endif
                     break;
                 }
                 req->state = RECV_ACK;
@@ -692,7 +707,7 @@ int main(int argc, char *argv[])
     int ret = 0;
     tftp_request req;
 
-#ifdef TIMER_ON
+#ifdef DEBUG
     double elapsed = 0;
     struct timespec start = {0};
     struct timespec end = {0};
@@ -854,7 +869,7 @@ int main(int argc, char *argv[])
         close(req.file_desc);
     }
 
-#ifdef TIMER_ON
+#ifdef DEBUG
     clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
 
@@ -875,7 +890,7 @@ int main(int argc, char *argv[])
         ret = tftp_send_file(&req);
     }
 
-#ifdef TIMER_ON
+#ifdef DEBUG
     clock_gettime(CLOCK_MONOTONIC, &end);
     elapsed = (double)(end.tv_sec - start.tv_sec) * 1000.0 +
               (double)(end.tv_nsec - start.tv_nsec) / 1e6;

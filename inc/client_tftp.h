@@ -26,7 +26,6 @@
 
 #include "common.h"
 
-// #define TIMER_ON 1
 #define PROG_BAR_LEN    64
 #define UPDATE_DIFF     1024 * 128
 #define OPTION_LEN      32
