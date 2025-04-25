@@ -80,13 +80,12 @@ jobs:
   
     - name: Test 10 concurrent downloads
       run: |
-        mkdir -p bld/concurrent
         for i in $(seq 1 10); do
           ./bld/client_tftp -g -l bld/file3_copy_$i.bin -r test/file3.bin 127.0.0.1 6969 &
         done
         wait
 
         for i in $(seq 1 10); do
-        cmp -s server_root/test/file3.bin bld/concurrent/file3_copy_$i.bin || exit 1
+        cmp -s server_root/test/file3.bin bld/file3_copy_$i.bin || exit 1
         done
       
